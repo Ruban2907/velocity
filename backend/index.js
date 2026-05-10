@@ -10,6 +10,7 @@ const recruitmentRoutes = require('./routes/recruitmentRoutes');
 const assessmentRoutes = require('./routes/assessmentRoutes');
 const emailTemplateRoutes = require('./routes/emailTemplateRoutes');
 const adminRoutes = require('./routes/adminRoutes');
+const jobRoutes = require('./routes/jobRoutes');
 const { trackActivity } = require('./middleware/activityMiddleware');
 const { authenticate } = require('./middleware/auth');
 
@@ -58,6 +59,7 @@ app.use('/api/resume', resumeRoutes);
 app.use('/api/recruitment', recruitmentRoutes);
 app.use('/api/assessments', assessmentRoutes);
 app.use('/api/email-templates', emailTemplateRoutes);
+app.use('/api/jobs', jobRoutes);
 
 // Admin Routes
 app.use('/api/admin', adminRoutes);

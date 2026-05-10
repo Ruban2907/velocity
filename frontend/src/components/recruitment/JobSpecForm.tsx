@@ -4,19 +4,18 @@ import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import api from "@/lib/api";
 import AssessmentModal, { AssessmentData } from "@/components/recruitment/AssessmentModal";
+import CandidateList from "@/components/recruitment/CandidateList";
 import { useToast } from "@/hooks/use-toast";
 
 const seniorityOptions = [
-  "intern",
-  "entry",
-  "junior",
-  "mid",
-  "senior",
-  "manager",
-  "director",
-  "vp",
-  "c_suite",
-  "founder",
+  { label: "C Suite", value: "c_suite" },
+  { label: "Director", value: "director" },
+  { label: "Manager", value: "manager" },
+  { label: "Senior", value: "senior" },
+  { label: "Entry", value: "entry" },
+  { label: "Owner", value: "owner" },
+  { label: "Partner", value: "partner" },
+  { label: "Intern", value: "intern" },
 ];
 
 const industryOptions = [
@@ -82,6 +81,11 @@ const JobSpecForm = ({ onSubmit }: JobSpecFormProps) => {
   const [assessmentOpen, setAssessmentOpen] = useState(false);
   const [assessmentLoading, setAssessmentLoading] = useState(false);
   const [assessmentError, setAssessmentError] = useState("");
+  const [savedJob, setSavedJob] = useState<any | null>(null);
+  const [candidates, setCandidates] = useState<any[]>([]);
+  const [loadingCandidates, setLoadingCandidates] = useState(false);
+  const [candidatesError, setCandidatesError] = useState("");
+  const [hasSearched, setHasSearched] = useState(false);
 
   const toggleSelection = (
     value: string,
@@ -161,9 +165,42 @@ const JobSpecForm = ({ onSubmit }: JobSpecFormProps) => {
 
     try {
       setSubmittingForm(true);
-      await generateAssessmentFromPayload(assessmentPayload);
+      const response = await api.post("/jobs", payload);
+      setSavedJob(response.data.data);
+      toast({
+        title: "Job specification saved",
+        description: "Your job specification was successfully saved.",
+      });
+    } catch (err: any) {
+      const message = err?.response?.data?.message || "Failed to save job spec.";
+      setError(message);
     } finally {
       setSubmittingForm(false);
+    }
+  };
+
+  const handleFindCandidates = async () => {
+    if (!savedJob || !savedJob._id) return;
+
+    setLoadingCandidates(true);
+    setCandidates([]);
+    setCandidatesError("");
+    setHasSearched(false);
+
+    try {
+      const response = await api.post("/recruitment/search", {
+        jobId: savedJob._id,
+      });
+      setCandidates(response.data.data || []);
+      toast({
+        title: "Candidates found",
+        description: `Successfully loaded ${response.data.data?.length || 0} candidates.`,
+      });
+    } catch (err: any) {
+      setCandidatesError("Candidate sourcing failed. Please try again.");
+    } finally {
+      setLoadingCandidates(false);
+      setHasSearched(true);
     }
   };
 
@@ -251,13 +288,13 @@ const JobSpecForm = ({ onSubmit }: JobSpecFormProps) => {
         <div className="flex flex-wrap gap-2">
           {seniorityOptions.map((option) => (
             <Button
-              key={option}
+              key={option.value}
               type="button"
-              variant={seniority.includes(option) ? "default" : "outline"}
+              variant={seniority.includes(option.value) ? "default" : "outline"}
               size="sm"
-              onClick={() => toggleSelection(option, seniority, setSeniority)}
+              onClick={() => toggleSelection(option.value, seniority, setSeniority)}
             >
-              {option}
+              {option.label}
             </Button>
           ))}
         </div>
@@ -339,15 +376,60 @@ const JobSpecForm = ({ onSubmit }: JobSpecFormProps) => {
 
       {error ? <p className="text-sm text-red-500">{error}</p> : null}
 
-      <div className="flex justify-end">
-        <Button type="submit" disabled={submittingForm || assessmentLoading}>
-          {submittingForm || assessmentLoading ? "Generating..." : "Generate MCQ Assessment"}
+      <div className="flex justify-end gap-2">
+        {savedJob ? (
+          <>
+            <Button
+              type="button"
+              variant="outline"
+              onClick={handleFindCandidates}
+              disabled={loadingCandidates}
+            >
+              {loadingCandidates ? "Finding candidates..." : "Find Candidates"}
+            </Button>
+            <Button
+              type="button"
+              variant="secondary"
+              onClick={handleGenerateAssessment}
+              disabled={assessmentLoading}
+            >
+              {assessmentLoading ? "Generating..." : "Generate MCQ Assessment"}
+            </Button>
+          </>
+        ) : null}
+        <Button type="submit" disabled={submittingForm}>
+          {submittingForm ? "Saving..." : "Save Job Specification"}
         </Button>
       </div>
 
-      {jobSpecData ? (
+      {candidatesError ? (
+        <div className="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-600">
+          {candidatesError}
+        </div>
+      ) : null}
+
+      {loadingCandidates && (
+        <div className="rounded-md border bg-muted/20 px-4 py-6 text-center text-sm font-medium text-muted-foreground animate-pulse">
+          Finding candidates... This can take up to 60 seconds depending on criteria.
+        </div>
+      )}
+
+      {candidates.length > 0 && !loadingCandidates ? (
+        <div className="space-y-4">
+          <h2 className="text-xl font-bold">Found {candidates.length} Candidates</h2>
+          <CandidateList candidates={candidates} />
+        </div>
+      ) : null}
+
+      {savedJob && candidates.length === 0 && !loadingCandidates && !candidatesError && hasSearched ? (
+        <div className="rounded-md border border-yellow-200 bg-yellow-50 px-3 py-2 text-xs text-yellow-700">
+          No candidates found. Try broader filters.
+        </div>
+      ) : null}
+
+      {savedJob && candidates.length === 0 && !loadingCandidates && !candidatesError && !hasSearched ? (
         <div className="rounded-md border bg-muted/20 px-3 py-2 text-xs text-muted-foreground">
-          Candidate sourcing is temporarily bypassed for testing. You can generate and open the exam link directly.
+          Job specification saved. You can now find candidates or generate the exam directly.
         </div>
       ) : null}
 

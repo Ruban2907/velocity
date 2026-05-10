@@ -20,92 +20,96 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { ScrollArea } from "@/components/ui/scroll-area";
-import { useMemo, useState } from "react";
+import { useMemo, useState, useEffect } from "react";
 import {
   Briefcase,
   CalendarClock,
+  ExternalLink,
+  FileText,
   LayoutGrid,
   ListChecks,
+  Loader2,
   MapPin,
   Plus,
   Search,
+  Settings,
+  Trash2,
+  UserCheck,
+  Users,
+  Zap,
 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
+import api from "@/lib/api";
 import JobSpecForm from "@/components/recruitment/JobSpecForm";
 
 const Jobs = () => {
-  // Note: this page previously used mock data. We keep it mocked for now,
-  // but enhance the UX heavily (search, tabs, dialogs, better visuals).
-  const jobs = [
-    {
-      id: 1,
-      title: "Senior Frontend Developer",
-      location: "Remote",
-      type: "Full-time",
-      applicants: 45,
-      status: "Active",
-      posted: "2 days ago",
-      postedDaysAgo: 2,
-    },
-    {
-      id: 2,
-      title: "Backend Engineer",
-      location: "New York, NY",
-      type: "Full-time",
-      applicants: 32,
-      status: "Active",
-      posted: "1 week ago",
-      postedDaysAgo: 7,
-    },
-    {
-      id: 3,
-      title: "UI/UX Designer",
-      location: "Remote",
-      type: "Contract",
-      applicants: 28,
-      status: "Draft",
-      posted: "3 days ago",
-      postedDaysAgo: 3,
-    },
-    {
-      id: 4,
-      title: "DevOps Engineer",
-      location: "San Francisco, CA",
-      type: "Full-time",
-      applicants: 19,
-      status: "Active",
-      posted: "5 days ago",
-      postedDaysAgo: 5,
-    },
-  ];
-
   const { toast } = useToast();
+  const [jobs, setJobs] = useState<any[]>([]);
+  const [loadingJobs, setLoadingJobs] = useState(true);
   const [statusTab, setStatusTab] = useState<"all" | "Active" | "Draft">("all");
   const [query, setQuery] = useState("");
   const [sortBy, setSortBy] = useState<"newest" | "applicants_desc" | "title_asc">("newest");
   const [view, setView] = useState<"cards" | "table">("cards");
   const [detailsOpen, setDetailsOpen] = useState(false);
-  const [selectedJobId, setSelectedJobId] = useState<number | null>(null);
+  const [selectedJobId, setSelectedJobId] = useState<string | null>(null);
   const [createOpen, setCreateOpen] = useState(false);
+  const [detailJob, setDetailJob] = useState<any>(null);
+  const [detailCandidates, setDetailCandidates] = useState<any[]>([]);
+  const [detailLoading, setDetailLoading] = useState(false);
+  const [manageOpen, setManageOpen] = useState(false);
+  const [manageJob, setManageJob] = useState<any>(null);
+  const [manageCandidates, setManageCandidates] = useState<any[]>([]);
+  const [manageLoading, setManageLoading] = useState(false);
+  const [actionLoading, setActionLoading] = useState<string | null>(null);
+
+  useEffect(() => {
+    const fetchJobs = async () => {
+      try {
+        setLoadingJobs(true);
+        const response = await api.get("/jobs");
+        setJobs(response.data.data || []);
+      } catch (err: any) {
+        toast({
+          title: "Error",
+          description: "Failed to load jobs",
+        });
+      } finally {
+        setLoadingJobs(false);
+      }
+    };
+    fetchJobs();
+  }, [toast]);
+
+  const processedJobs = useMemo(() => {
+    return jobs.map(j => ({
+      ...j,
+      id: j._id,
+      title: j.jobTitle?.join(", ") || "Untitled",
+      location: j.location?.join(", ") || "No location",
+      type: "Full-time", // Dummy type for layout
+      status: "Active",
+      applicants: j.candidateCount || 0,
+      posted: new Date(j.createdAt).toLocaleDateString(),
+      postedDaysAgo: Math.floor((new Date().getTime() - new Date(j.createdAt).getTime()) / (1000 * 3600 * 24)),
+      searchableString: `${j.jobTitle?.join(" ")} ${j.location?.join(" ")} ${j.industry?.join(" ")} ${j.seniority?.join(" ")}`.toLowerCase()
+    }));
+  }, [jobs]);
 
   const selectedJob = useMemo(() => {
     if (!selectedJobId) return null;
-    return jobs.find((j) => j.id === selectedJobId) || null;
-  }, [jobs, selectedJobId]);
+    return processedJobs.find((j) => j.id === selectedJobId) || null;
+  }, [processedJobs, selectedJobId]);
 
   const filteredJobs = useMemo(() => {
     const q = query.trim().toLowerCase();
 
     const withStatus =
-      statusTab === "all" ? jobs : jobs.filter((job) => job.status === statusTab);
+      statusTab === "all" ? processedJobs : processedJobs.filter((job) => job.status === statusTab);
 
     const withQuery =
       q.length === 0
         ? withStatus
-        : withStatus.filter((job) => {
-            const haystack = `${job.title} ${job.location} ${job.type} ${job.status}`.toLowerCase();
-            return haystack.includes(q);
-          });
+        : withStatus.filter((job) => job.searchableString.includes(q));
 
     const sorted = [...withQuery].sort((a, b) => {
       if (sortBy === "newest") return a.postedDaysAgo - b.postedDaysAgo;
@@ -114,11 +118,110 @@ const Jobs = () => {
     });
 
     return sorted;
-  }, [jobs, query, sortBy, statusTab]);
+  }, [processedJobs, query, sortBy, statusTab]);
 
-  const openDetails = (jobId: number) => {
+  const openDetails = async (jobId: string) => {
     setSelectedJobId(jobId);
     setDetailsOpen(true);
+    setDetailLoading(true);
+    setDetailJob(null);
+    setDetailCandidates([]);
+    try {
+      const [jobRes, candidatesRes] = await Promise.all([
+        api.get(`/jobs/${jobId}`),
+        api.get("/recruitment/candidates", { params: { jobId } }),
+      ]);
+      setDetailJob(jobRes.data.data || null);
+      setDetailCandidates(candidatesRes.data.data || []);
+    } catch {
+      toast({ title: "Error", description: "Failed to load job details." });
+    } finally {
+      setDetailLoading(false);
+    }
+  };
+
+  const openManage = async (jobId: string) => {
+    setSelectedJobId(jobId);
+    setManageOpen(true);
+    setManageLoading(true);
+    setManageJob(null);
+    setManageCandidates([]);
+    try {
+      const [jobRes, candidatesRes] = await Promise.all([
+        api.get(`/jobs/${jobId}`),
+        api.get("/recruitment/candidates", { params: { jobId } }),
+      ]);
+      setManageJob(jobRes.data.data || null);
+      setManageCandidates(candidatesRes.data.data || []);
+    } catch {
+      toast({ title: "Error", description: "Failed to load management data." });
+    } finally {
+      setManageLoading(false);
+    }
+  };
+
+  const handleContactCandidate = async (candidateId: string) => {
+    try {
+      setActionLoading(`contact-${candidateId}`);
+      await api.put(`/recruitment/candidates/${candidateId}/contacted`);
+      setManageCandidates(prev => 
+        prev.map(c => c._id === candidateId ? { ...c, contactStatus: "Contacted" } : c)
+      );
+      toast({ title: "Status Updated", description: "Candidate marked as contacted." });
+    } catch (err) {
+      console.error("Contact error:", err);
+      toast({ title: "Update Failed", description: "Could not update candidate status.", variant: "destructive" });
+    } finally {
+      setActionLoading(null);
+    }
+  };
+
+  const handleDeleteCandidate = async (candidateId: string) => {
+    try {
+      setActionLoading(`delete-${candidateId}`);
+      await api.delete(`/recruitment/candidates/${candidateId}`);
+      
+      // Update manage list
+      setManageCandidates(prev => prev.filter(c => c._id !== candidateId));
+      
+      // Update main jobs list candidate count
+      setJobs(prev => prev.map(job => {
+        if (job._id === selectedJobId) {
+          return { ...job, candidateCount: (job.candidateCount || 1) - 1 };
+        }
+        return job;
+      }));
+
+      toast({ title: "Candidate Removed", description: "Candidate has been deleted from this job." });
+    } catch (err) {
+      console.error("Delete candidate error:", err);
+      toast({ title: "Delete Failed", description: "Failed to remove candidate.", variant: "destructive" });
+    } finally {
+      setActionLoading(null);
+    }
+  };
+
+  const handleDeleteJob = async (jobId: string) => {
+    // For Phase 3 verification, we'll skip native confirm if requested or use a simpler check
+    // In a real app we'd use a custom Dialog confirmation
+    try {
+      setActionLoading(`delete-job-${jobId}`);
+      await api.delete(`/jobs/${jobId}`);
+      
+      // Update local list
+      setJobs(prev => prev.filter(j => j._id !== jobId));
+      setManageOpen(false);
+      
+      toast({ 
+        title: "Job Specification Deleted", 
+        description: "The specification and all linked candidates have been removed." 
+      });
+    } catch (err) {
+      console.error("Delete job error:", err);
+      toast({ title: "Error", description: "Failed to delete job specification.", variant: "destructive" });
+    } finally {
+      setActionLoading(null);
+    }
   };
 
   const applicantPercent = (count: number) => {
@@ -235,11 +338,15 @@ const Jobs = () => {
         </Card>
 
         {/* Jobs */}
-        {view === "cards" ? (
+        {loadingJobs ? (
+          <Card className="p-10 text-center animate-pulse">
+            <p className="text-muted-foreground">Loading job specifications...</p>
+          </Card>
+        ) : view === "cards" ? (
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
             {filteredJobs.length === 0 ? (
               <Card className="p-10 text-center">
-                <p className="text-muted-foreground">No jobs match your search.</p>
+                <p className="text-muted-foreground">{jobs.length === 0 ? "No job specifications found yet." : "No jobs match your search."}</p>
               </Card>
             ) : null}
 
@@ -312,13 +419,7 @@ const Jobs = () => {
                     <Button
                       size="sm"
                       className="flex-1"
-                      onClick={() => {
-                        toast({
-                          title: "Manage (demo)",
-                          description: "Open the details dialog to review this job.",
-                        });
-                        openDetails(job.id);
-                      }}
+                      onClick={() => openManage(job.id)}
                     >
                       Manage
                     </Button>
@@ -345,7 +446,7 @@ const Jobs = () => {
                   {filteredJobs.length === 0 ? (
                     <tr>
                       <td className="px-6 py-10 text-center text-muted-foreground" colSpan={6}>
-                        No jobs match your search.
+                        {jobs.length === 0 ? "No job specifications found yet." : "No jobs match your search."}
                       </td>
                     </tr>
                   ) : null}
@@ -388,13 +489,7 @@ const Jobs = () => {
                           </Button>
                           <Button
                             size="sm"
-                            onClick={() => {
-                              toast({
-                                title: "Manage (demo)",
-                                description: "Open the details dialog to review this job.",
-                              });
-                              openDetails(job.id);
-                            }}
+                            onClick={() => openManage(job.id)}
                           >
                             Manage
                           </Button>
@@ -408,96 +503,353 @@ const Jobs = () => {
           </Card>
         )}
 
-        {/* Details Dialog */}
+        {/* Details Dialog — Read-only view */}
         <Dialog open={detailsOpen} onOpenChange={setDetailsOpen}>
-          <DialogContent className="max-w-3xl h-[85vh] flex flex-col">
-            <DialogHeader>
-              <DialogTitle>{selectedJob?.title || "Job Details"}</DialogTitle>
-              <DialogDescription>
-                {selectedJob
-                  ? `${selectedJob.location} • ${selectedJob.type} • ${selectedJob.applicants} applicants`
-                  : "Review the job specification details."}
-              </DialogDescription>
-            </DialogHeader>
+          <DialogContent className="max-w-4xl max-h-[90vh] flex flex-col p-0 gap-0 overflow-y-auto scrollbar-thin">
+            <div className="sticky top-0 z-20 p-6 pb-4 border-b bg-background shadow-sm">
+              <DialogHeader>
+                <DialogTitle className="text-2xl font-bold flex items-center gap-2">
+                  <Briefcase className="h-6 w-6 text-primary" />
+                  {detailJob?.jobTitle?.join(", ") || selectedJob?.title || "Job Details"}
+                </DialogTitle>
+                <DialogDescription className="text-base">
+                  {detailJob
+                    ? `${detailJob.location?.join(", ")} • ${detailJob.candidateCount ?? 0} candidates saved`
+                    : "Loading job details..."}
+                </DialogDescription>
+              </DialogHeader>
+            </div>
 
-            <ScrollArea className="flex-1 pr-3">
-              {selectedJob ? (
-                <div className="space-y-6 pb-2">
-                  <div className="flex flex-wrap gap-2 items-center">
-                    <Badge
-                      className={
-                        selectedJob.status === "Active"
-                          ? "bg-primary/10 text-primary"
-                          : "bg-muted text-muted-foreground"
-                      }
-                    >
-                      {selectedJob.status}
-                    </Badge>
-                    <Badge variant="outline">{selectedJob.type}</Badge>
-                    <Badge variant="outline" className="gap-1">
-                      <MapPin className="h-3.5 w-3.5" />
-                      {selectedJob.location}
-                    </Badge>
-                    <Badge variant="outline" className="gap-1">
-                      <CalendarClock className="h-3.5 w-3.5" />
-                      {selectedJob.posted}
-                    </Badge>
+            <div className="flex-1 p-6 pr-8">
+              {detailLoading ? (
+                  <div className="flex flex-col items-center justify-center py-20 gap-3">
+                    <Loader2 className="h-10 w-10 animate-spin text-primary" />
+                    <p className="text-muted-foreground font-medium">Fetching job specification...</p>
                   </div>
-
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                    <Card className="p-4 bg-muted/20">
-                      <p className="text-sm text-muted-foreground">Applicant count</p>
-                      <p className="text-3xl font-bold text-foreground mt-1">{selectedJob.applicants}</p>
-                      <p className="text-xs text-muted-foreground mt-2">
-                        A quick indicator for how many candidates are matching your role.
-                      </p>
-                    </Card>
-                    <Card className="p-4 bg-muted/20">
-                      <p className="text-sm text-muted-foreground">Highlights</p>
-                      <div className="mt-3 flex flex-wrap gap-2">
-                        <Badge variant="secondary">Recruitment</Badge>
-                        <Badge variant="secondary">Assessment</Badge>
-                        <Badge variant="secondary">Analytics</Badge>
+                ) : detailJob ? (
+                  <div className="space-y-10 pb-6">
+                    {/* Job Specification section */}
+                    <section className="animate-in fade-in slide-in-from-bottom-4 duration-500">
+                      <div className="flex items-center gap-2 mb-6">
+                        <div className="h-8 w-1 bg-primary rounded-full" />
+                        <h3 className="text-lg font-bold tracking-tight flex items-center gap-2 text-foreground">
+                          <FileText className="h-5 w-5 text-primary" />
+                          Job Specification
+                        </h3>
                       </div>
-                      <p className="text-xs text-muted-foreground mt-3">
-                        Next step: create an assessment and send it to shortlisted candidates.
-                      </p>
-                    </Card>
-                  </div>
+                      
+                      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
+                        {[
+                          { label: "Job Title", value: detailJob.jobTitle?.join(", ") },
+                          { label: "Location", value: detailJob.location?.join(", ") },
+                          { label: "Seniority", value: detailJob.seniority?.join(", ") },
+                          { label: "Industry", value: detailJob.industry?.join(", ") },
+                          { label: "Company Size", value: detailJob.companySize?.join(", ") },
+                          { label: "Skills", value: detailJob.postFilters?.skills?.join(", ") },
+                          { label: "Keywords", value: detailJob.keywords },
+                          { label: "Experience", value: detailJob.postFilters?.minExperienceYears != null ? `${detailJob.postFilters.minExperienceYears} years` : undefined },
+                          { label: "Education", value: detailJob.postFilters?.education },
+                          { label: "Email Required", value: detailJob.emailRequired ? "Yes" : "No" },
+                          { label: "Results Count", value: detailJob.perPage?.toString() },
+                          { label: "Created Date", value: detailJob.createdAt ? new Date(detailJob.createdAt).toLocaleDateString(undefined, { dateStyle: 'long' }) : undefined },
+                        ].map((f) => (
+                          <div key={f.label} className="group p-4 rounded-xl border bg-card hover:bg-muted/5 transition-all duration-200 shadow-sm hover:shadow-md">
+                            <p className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground mb-1.5 group-hover:text-primary transition-colors">{f.label}</p>
+                            <p className="text-sm font-semibold text-foreground break-words leading-relaxed">
+                              {f.value || <span className="text-muted-foreground font-normal italic">Not specified</span>}
+                            </p>
+                          </div>
+                        ))}
+                      </div>
+                    </section>
 
-                  <Card className="p-5">
-                    <h3 className="font-semibold mb-3">Quick actions</h3>
-                    <div className="flex flex-col sm:flex-row gap-2">
-                      <Button
-                        variant="outline"
-                        className="flex-1"
-                        onClick={() =>
-                          toast({
-                            title: "View Details (demo)",
-                            description: "In the next step, wire this dialog to your backend job-spec list.",
-                          })
-                        }
-                      >
-                        Open Spec
-                      </Button>
-                      <Button
-                        className="flex-1"
-                        onClick={() =>
-                          toast({
-                            title: "Manage (demo)",
-                            description: "Connect this to sending assessments or candidate flow.",
-                          })
-                        }
-                      >
-                        Continue to Candidates
-                      </Button>
-                    </div>
-                  </Card>
+                    {/* Candidates section */}
+                    <section className="animate-in fade-in slide-in-from-bottom-4 duration-500 delay-150">
+                      <div className="flex items-center justify-between mb-6">
+                        <div className="flex items-center gap-2">
+                          <div className="h-8 w-1 bg-primary rounded-full" />
+                          <h3 className="text-lg font-bold tracking-tight flex items-center gap-2 text-foreground">
+                            <Users className="h-5 w-5 text-primary" />
+                            Candidates
+                          </h3>
+                        </div>
+                        {detailCandidates.length > 0 && (
+                          <Badge className="bg-primary/10 text-primary hover:bg-primary/20 transition-colors font-bold px-3 py-1">
+                            {detailCandidates.length} Found
+                          </Badge>
+                        )}
+                      </div>
+
+                      {detailCandidates.length > 0 ? (
+                        <div className="rounded-2xl border bg-card overflow-hidden shadow-sm">
+                          <div className="overflow-x-auto">
+                            <table className="w-full text-sm">
+                              <thead>
+                                <tr className="bg-muted/50 border-b">
+                                  <th className="px-6 py-4 text-left font-bold text-muted-foreground uppercase tracking-wider text-[10px]">Name</th>
+                                  <th className="px-6 py-4 text-left font-bold text-muted-foreground uppercase tracking-wider text-[10px]">Title</th>
+                                  <th className="px-6 py-4 text-left font-bold text-muted-foreground uppercase tracking-wider text-[10px]">Email</th>
+                                  <th className="px-6 py-4 text-left font-bold text-muted-foreground uppercase tracking-wider text-[10px]">LinkedIn</th>
+                                  <th className="px-6 py-4 text-left font-bold text-muted-foreground uppercase tracking-wider text-[10px]">Location</th>
+                                  <th className="px-6 py-4 text-left font-bold text-muted-foreground uppercase tracking-wider text-[10px]">Company</th>
+                                  <th className="px-6 py-4 text-left font-bold text-muted-foreground uppercase tracking-wider text-[10px]">Status</th>
+                                </tr>
+                              </thead>
+                              <tbody className="divide-y divide-border">
+                                {detailCandidates.map((c: any, idx: number) => (
+                                  <tr key={c._id || idx} className="hover:bg-muted/20 transition-all duration-150 group">
+                                    <td className="px-6 py-4 font-bold text-foreground group-hover:text-primary transition-colors">{c.name}</td>
+                                    <td className="px-6 py-4">
+                                      <div className="max-w-[200px] truncate font-medium text-muted-foreground group-hover:text-foreground transition-colors" title={c.title}>
+                                        {c.title}
+                                      </div>
+                                    </td>
+                                    <td className="px-6 py-4">
+                                      {c.email && c.email !== "N/A" ? (
+                                        <a href={`mailto:${c.email}`} className="text-primary hover:underline font-medium flex items-center gap-1.5 transition-all">
+                                          {c.email}
+                                        </a>
+                                      ) : (
+                                        <span className="text-muted-foreground/60 italic text-xs">N/A</span>
+                                      )}
+                                    </td>
+                                    <td className="px-6 py-4">
+                                      {c.linkedinUrl && c.linkedinUrl !== "N/A" ? (
+                                        <a 
+                                          href={c.linkedinUrl} 
+                                          target="_blank" 
+                                          rel="noopener noreferrer" 
+                                          className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-primary/5 text-primary hover:bg-primary/10 transition-all font-medium text-xs"
+                                        >
+                                          <ExternalLink className="h-3 w-3" /> Profile
+                                        </a>
+                                      ) : (
+                                        <span className="text-muted-foreground/60 text-xs">N/A</span>
+                                      )}
+                                    </td>
+                                    <td className="px-6 py-4 font-medium text-muted-foreground group-hover:text-foreground transition-colors">{c.location}</td>
+                                    <td className="px-6 py-4">
+                                      <div className="max-w-[150px] truncate font-medium text-muted-foreground group-hover:text-foreground transition-colors" title={c.companyName}>
+                                        {c.companyName}
+                                      </div>
+                                    </td>
+                                    <td className="px-6 py-4">
+                                      <Badge 
+                                        variant={c.contactStatus === "Contacted" ? "default" : "secondary"} 
+                                        className={`font-bold text-[10px] uppercase tracking-wider px-2 py-0.5 rounded-md ${
+                                          c.contactStatus === "Contacted" ? 'bg-primary/20 text-primary hover:bg-primary/30 border-none' : 'bg-muted text-muted-foreground border-none'
+                                        }`}
+                                      >
+                                        {c.contactStatus || "Not Contacted"}
+                                      </Badge>
+                                    </td>
+                                  </tr>
+                                ))}
+                              </tbody>
+                            </table>
+                          </div>
+                        </div>
+                      ) : (
+                        <div className="rounded-2xl border border-dashed border-muted-foreground/20 p-12 text-center bg-muted/5 group">
+                          <div className="bg-muted w-16 h-16 rounded-full flex items-center justify-center mx-auto mb-4 group-hover:scale-110 transition-transform duration-300">
+                            <Users className="h-8 w-8 text-muted-foreground/50" />
+                          </div>
+                          <p className="text-base font-bold text-foreground">No candidates yet</p>
+                          <p className="text-sm text-muted-foreground mt-1 max-w-xs mx-auto">
+                            This job specification hasn't been used to source candidates yet. Use the <span className="font-bold text-primary">Manage</span> action to find talent.
+                          </p>
+                        </div>
+                      )}
+                    </section>
+                  </div>
+                ) : (
+                  <div className="flex flex-col items-center justify-center py-20 gap-3">
+                    <Loader2 className="h-10 w-10 animate-spin text-primary" />
+                    <p className="text-muted-foreground font-medium">Waiting for job data...</p>
+                  </div>
+                )}
+              </div>
+          </DialogContent>
+        </Dialog>
+
+        {/* Manage Dialog — Action view */}
+        <Dialog open={manageOpen} onOpenChange={setManageOpen}>
+          <DialogContent className="max-w-5xl max-h-[90vh] flex flex-col p-0 gap-0 overflow-y-auto scrollbar-thin">
+            <div className="sticky top-0 z-20 p-6 pb-4 border-b bg-background shadow-sm">
+              <DialogHeader>
+                <div className="flex items-center justify-between">
+                  <div className="space-y-1">
+                    <DialogTitle className="text-2xl font-bold flex items-center gap-2">
+                      <Settings className="h-6 w-6 text-primary" />
+                      Manage: {manageJob?.jobTitle?.join(", ") || "Job Specification"}
+                    </DialogTitle>
+                    <DialogDescription className="text-base">
+                      Review candidates, generate assessments, or delete this specification.
+                    </DialogDescription>
+                  </div>
+                  <div className="flex items-center gap-3">
+                    <Button 
+                      variant="outline" 
+                      className="gap-2 border-primary/20 hover:bg-primary/5"
+                      onClick={() => toast({ title: "Generate Quiz", description: "Assessment module integration coming soon." })}
+                    >
+                      <Zap className="h-4 w-4 text-primary" />
+                      Generate Quiz
+                    </Button>
+                    <Button 
+                      variant="destructive" 
+                      className="gap-2"
+                      onClick={() => handleDeleteJob(selectedJobId!)}
+                      disabled={actionLoading === `delete-job-${selectedJobId}`}
+                    >
+                      {actionLoading === `delete-job-${selectedJobId}` ? <Loader2 className="h-4 w-4 animate-spin" /> : <Trash2 className="h-4 w-4" />}
+                      Delete Job
+                    </Button>
+                  </div>
                 </div>
-              ) : (
-                <p className="text-muted-foreground">No job selected.</p>
-              )}
-            </ScrollArea>
+              </DialogHeader>
+            </div>
+
+            <div className="flex-1 p-6 pr-8">
+              {manageLoading ? (
+                  <div className="flex flex-col items-center justify-center py-20 gap-3">
+                    <Loader2 className="h-10 w-10 animate-spin text-primary" />
+                    <p className="text-muted-foreground font-medium">Loading candidate data...</p>
+                  </div>
+                ) : (
+                  <div className="space-y-8 pb-6">
+                    {/* Candidate Management section */}
+                    <section className="animate-in fade-in slide-in-from-bottom-4 duration-500">
+                      <div className="flex items-center justify-between mb-6">
+                        <div className="flex items-center gap-2">
+                          <div className="h-8 w-1 bg-primary rounded-full" />
+                          <h3 className="text-lg font-bold tracking-tight flex items-center gap-2 text-foreground">
+                            <Users className="h-5 w-5 text-primary" />
+                            Candidate Management
+                          </h3>
+                        </div>
+                        {manageCandidates.length > 0 && (
+                          <Badge className="bg-primary/10 text-primary font-bold px-3 py-1">
+                            {manageCandidates.length} Saved Candidates
+                          </Badge>
+                        )}
+                      </div>
+
+                      {manageCandidates.length > 0 ? (
+                        <div className="rounded-2xl border bg-card overflow-hidden shadow-sm">
+                          <div className="overflow-x-auto">
+                            <table className="w-full text-sm min-w-[800px]">
+                              <thead>
+                                <tr className="bg-muted/50 border-b">
+                                  <th className="px-6 py-4 text-left font-bold text-muted-foreground uppercase tracking-wider text-[10px]">Name</th>
+                                  <th className="px-6 py-4 text-left font-bold text-muted-foreground uppercase tracking-wider text-[10px]">Title</th>
+                                  <th className="px-6 py-4 text-left font-bold text-muted-foreground uppercase tracking-wider text-[10px]">Contact Info</th>
+                                  <th className="px-6 py-4 text-left font-bold text-muted-foreground uppercase tracking-wider text-[10px]">Location</th>
+                                  <th className="px-6 py-4 text-left font-bold text-muted-foreground uppercase tracking-wider text-[10px]">Company</th>
+                                  <th className="px-6 py-4 text-left font-bold text-muted-foreground uppercase tracking-wider text-[10px]">Status</th>
+                                  <th className="px-6 py-4 text-right font-bold text-muted-foreground uppercase tracking-wider text-[10px]">Actions</th>
+                                </tr>
+                              </thead>
+                              <tbody className="divide-y divide-border">
+                                {manageCandidates.map((c: any, idx: number) => (
+                                  <tr key={c._id || idx} className="hover:bg-muted/10 transition-all duration-150 group">
+                                    <td className="px-6 py-4">
+                                      <div className="font-bold text-foreground group-hover:text-primary transition-colors">{c.name}</div>
+                                      <div className="text-[10px] text-muted-foreground font-medium uppercase tracking-tighter">{c.seniority || 'N/A'}</div>
+                                    </td>
+                                    <td className="px-6 py-4">
+                                      <div className="max-w-[180px] truncate font-medium text-muted-foreground group-hover:text-foreground transition-colors" title={c.title}>
+                                        {c.title}
+                                      </div>
+                                    </td>
+                                    <td className="px-6 py-4">
+                                      <div className="flex flex-col gap-1">
+                                        {c.email && c.email !== "N/A" ? (
+                                          <a href={`mailto:${c.email}`} className="text-primary hover:underline font-medium text-xs">
+                                            {c.email}
+                                          </a>
+                                        ) : (
+                                          <span className="text-muted-foreground/60 italic text-xs">No Email</span>
+                                        )}
+                                        {c.linkedinUrl && c.linkedinUrl !== "N/A" ? (
+                                          <a 
+                                            href={c.linkedinUrl} 
+                                            target="_blank" 
+                                            rel="noopener noreferrer" 
+                                            className="text-muted-foreground hover:text-primary transition-colors text-xs flex items-center gap-1"
+                                          >
+                                            <ExternalLink className="h-2.5 w-2.5" /> LinkedIn
+                                          </a>
+                                        ) : null}
+                                      </div>
+                                    </td>
+                                    <td className="px-6 py-4 font-medium text-muted-foreground group-hover:text-foreground transition-colors">{c.location}</td>
+                                    <td className="px-6 py-4">
+                                      <div className="max-w-[140px] truncate font-medium text-muted-foreground group-hover:text-foreground transition-colors" title={c.companyName}>
+                                        {c.companyName}
+                                      </div>
+                                    </td>
+                                    <td className="px-6 py-4">
+                                      <Badge 
+                                        variant={c.contactStatus === "Contacted" ? "default" : "secondary"} 
+                                        className={`font-bold text-[10px] uppercase tracking-wider px-2 py-0.5 rounded-md ${
+                                          c.contactStatus === "Contacted" ? 'bg-primary/20 text-primary border-none' : 'bg-muted text-muted-foreground border-none'
+                                        }`}
+                                      >
+                                        {c.contactStatus || "Not Contacted"}
+                                      </Badge>
+                                    </td>
+                                    <td className="px-6 py-4">
+                                      <div className="flex items-center justify-end gap-2">
+                                        {c.contactStatus === "Contacted" ? (
+                                          <Button variant="ghost" size="sm" disabled className="h-8 gap-1.5 text-[10px] uppercase font-bold text-muted-foreground/50">
+                                            <UserCheck className="h-3.5 w-3.5" />
+                                            Already Contacted
+                                          </Button>
+                                        ) : (
+                                          <Button 
+                                            variant="outline" 
+                                            size="sm" 
+                                            className="h-8 gap-1.5 text-[10px] uppercase font-bold border-primary/20 text-primary hover:bg-primary/5"
+                                            onClick={() => handleContactCandidate(c._id)}
+                                            disabled={actionLoading === `contact-${c._id}`}
+                                          >
+                                            {actionLoading === `contact-${c._id}` ? <Loader2 className="h-3 w-3 animate-spin" /> : <UserCheck className="h-3.5 w-3.5" />}
+                                            Contact Candidate
+                                          </Button>
+                                        )}
+                                        <Button 
+                                          variant="ghost" 
+                                          size="sm" 
+                                          className="h-8 w-8 p-0 text-muted-foreground hover:text-destructive hover:bg-destructive/5 transition-colors"
+                                          onClick={() => handleDeleteCandidate(c._id)}
+                                          disabled={actionLoading === `delete-${c._id}`}
+                                        >
+                                          {actionLoading === `delete-${c._id}` ? <Loader2 className="h-3 w-3 animate-spin" /> : <Trash2 className="h-3.5 w-3.5" />}
+                                        </Button>
+                                      </div>
+                                    </td>
+                                  </tr>
+                                ))}
+                              </tbody>
+                            </table>
+                          </div>
+                        </div>
+                      ) : (
+                        <div className="rounded-2xl border border-dashed border-muted-foreground/20 p-12 text-center bg-muted/5 group">
+                          <div className="bg-muted w-16 h-16 rounded-full flex items-center justify-center mx-auto mb-4 group-hover:scale-110 transition-transform duration-300">
+                            <Users className="h-8 w-8 text-muted-foreground/50" />
+                          </div>
+                          <p className="text-base font-bold text-foreground">No candidates to manage</p>
+                          <p className="text-sm text-muted-foreground mt-1 max-w-xs mx-auto">
+                            Go to the <span className="font-bold text-primary">View Details</span> or create a new specification to start sourcing.
+                          </p>
+                        </div>
+                      )}
+                    </section>
+                  </div>
+                )}
+              </div>
           </DialogContent>
         </Dialog>
       </div>
