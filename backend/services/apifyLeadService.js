@@ -6,6 +6,12 @@ const client = new ApifyClient({
 });
 
 async function fetchLeadsFromApify(jobData) {
+    if (!process.env.APIFY_TOKEN) {
+        const err = new Error("APIFY_TOKEN is missing in backend environment.");
+        err.statusCode = 500;
+        throw err;
+    }
+
     let personLocationCityIncludes = [];
     let personLocationCountryIncludes = [];
 

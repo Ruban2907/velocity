@@ -5,6 +5,103 @@ const Candidate = require("../model/Candidate");
 
 const router = express.Router();
 
+const normalizeString = (value) => String(value || "").trim().toLowerCase();
+
+const toArray = (value) => {
+  if (!value) return [];
+  if (Array.isArray(value)) return value.map((v) => String(v || "").trim()).filter(Boolean);
+  return String(value)
+    .split(",")
+    .map((v) => v.trim())
+    .filter(Boolean);
+};
+
+const hasTokenMatch = (candidateText, tokens) => {
+  const haystack = normalizeString(candidateText);
+  if (!haystack || !tokens.length) return false;
+  return tokens.some((token) => haystack.includes(normalizeString(token)));
+};
+
+const deriveMatchLabel = (score) => {
+  if (score >= 75) return "Strong match";
+  if (score >= 45) return "Moderate match";
+  return "Low match";
+};
+
+const rankCandidate = (candidate, jobData) => {
+  const reasons = [];
+  let score = 0;
+
+  const titleTokens = toArray(jobData?.jobTitle);
+  const locationTokens = toArray(jobData?.location);
+  const seniorityTokens = toArray(jobData?.seniority);
+  const industryTokens = toArray(jobData?.industry).map((x) => x.replace(/_/g, " "));
+  const keywordTokens = toArray(jobData?.keywords);
+  const skillTokens = toArray(jobData?.postFilters?.skills);
+  const needsEmail = Boolean(jobData?.emailRequired);
+
+  const title = String(candidate?.title || "");
+  const seniority = String(candidate?.seniority || "");
+  const location = String(candidate?.location || "");
+  const industry = String(candidate?.companyIndustry || "");
+  const company = String(candidate?.companyName || "");
+  const email = String(candidate?.email || "");
+
+  const searchableText = [title, seniority, location, industry, company].join(" ");
+
+  const titleMatched = hasTokenMatch(title, titleTokens);
+  if (titleMatched) {
+    score += 35;
+    reasons.push("title matched");
+  }
+
+  const seniorityMatched = hasTokenMatch(seniority, seniorityTokens);
+  if (seniorityMatched) {
+    score += 20;
+    reasons.push("seniority matched");
+  }
+
+  const locationMatched = hasTokenMatch(location, locationTokens);
+  if (locationMatched) {
+    score += 15;
+    reasons.push("location matched");
+  }
+
+  const industryMatched = hasTokenMatch(industry, industryTokens);
+  if (industryMatched) {
+    score += 10;
+    reasons.push("industry matched");
+  }
+
+  const keywordsMatched = hasTokenMatch(searchableText, keywordTokens);
+  if (keywordsMatched) {
+    score += 15;
+    reasons.push("keyword overlap");
+  }
+
+  if (needsEmail && email) {
+    score += 5;
+    reasons.push("email available");
+  }
+
+  const skillsMatched = hasTokenMatch(searchableText, skillTokens);
+  if (skillTokens.length > 0 && skillsMatched) {
+    score += 5;
+    reasons.push("skills overlap");
+  }
+
+  const passesSkillFilter = !skillTokens.length || skillsMatched;
+  const passesEmailFilter = !needsEmail || Boolean(email);
+  const passesFilters = passesSkillFilter && passesEmailFilter;
+
+  return {
+    score: Math.max(0, Math.min(100, score)),
+    label: deriveMatchLabel(score),
+    reasons,
+    passesFilters,
+  };
+};
+
 router.post("/search", async (req, res) => {
   try {
     const { jobId } = req.body || {};
@@ -16,21 +113,32 @@ router.post("/search", async (req, res) => {
       });
     }
 
-    // 3. Check existing candidates
-    const existingCandidates = await Candidate.find({ jobId });
-    if (existingCandidates.length > 0) {
-      return res.status(200).json({
-        success: true,
-        data: existingCandidates,
-      });
-    }
-
-    // 4. IF no candidates exist: A. Fetch JobSpec
     const jobData = await JobSpec.findById(jobId);
     if (!jobData) {
       return res.status(404).json({
         success: false,
         message: "Job not found",
+      });
+    }
+
+    // 3. Check existing candidates
+    const existingCandidates = await Candidate.find({ jobId });
+    if (existingCandidates.length > 0) {
+      const rankedExisting = existingCandidates
+        .map((candidate) => {
+          const ranking = rankCandidate(candidate, jobData);
+          return {
+            ...candidate.toObject(),
+            matchScore: ranking.score,
+            matchLabel: ranking.label,
+            rankingReasons: ranking.reasons,
+          };
+        })
+        .sort((a, b) => b.matchScore - a.matchScore);
+
+      return res.status(200).json({
+        success: true,
+        data: rankedExisting,
       });
     }
 
@@ -42,7 +150,7 @@ router.post("/search", async (req, res) => {
       console.error("Apify execution error:", apifyError);
       return res.status(500).json({
         success: false,
-        message: "Lead sourcing failed",
+        message: apifyError?.message || "Lead sourcing failed",
       });
     }
 
@@ -125,12 +233,15 @@ router.post("/search", async (req, res) => {
       });
     }
 
-    // 5. Save candidates using insertMany
+    // 5. Filter + rank + dedupe, then save using insertMany
     const candidatesToInsert = [];
     const seenEmails = new Set();
     const seenLinkedins = new Set();
 
     for (const lead of cleanedLeads) {
+      const ranking = rankCandidate(lead, jobData);
+      if (!ranking.passesFilters) continue;
+
       let isDuplicate = false;
       if (lead.email && seenEmails.has(lead.email)) isDuplicate = true;
       if (lead.linkedinUrl && seenLinkedins.has(lead.linkedinUrl)) isDuplicate = true;
@@ -144,13 +255,26 @@ router.post("/search", async (req, res) => {
       candidatesToInsert.push({
         ...lead,
         jobId,
-        contactStatus: "Not Contacted"
+        contactStatus: "Not Contacted",
+        matchScore: ranking.score,
+        matchLabel: ranking.label,
+        rankingReasons: ranking.reasons,
       });
     }
+
+    candidatesToInsert.sort((a, b) => b.matchScore - a.matchScore);
 
     let savedCandidates = [];
     if (candidatesToInsert.length > 0) {
       savedCandidates = await Candidate.insertMany(candidatesToInsert);
+    }
+
+    if (savedCandidates.length === 0) {
+      return res.status(200).json({
+        success: true,
+        message: "Invalid or No Matching Candidates.",
+        data: [],
+      });
     }
 
     console.log("jobId:", jobId);
@@ -187,7 +311,7 @@ router.get("/candidates", async (req, res) => {
       });
     }
 
-    const candidates = await Candidate.find({ jobId }).sort({ createdAt: -1 });
+    const candidates = await Candidate.find({ jobId }).sort({ matchScore: -1, createdAt: -1 });
 
     return res.status(200).json({
       success: true,

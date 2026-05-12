@@ -23,6 +23,9 @@ const candidateSchema = new mongoose.Schema({
     enum: ["Not Contacted", "Contacted"],
     default: "Not Contacted",
   },
+  matchScore: { type: Number, default: 0 },
+  matchLabel: { type: String, default: "Low match" },
+  rankingReasons: [{ type: String }],
   createdAt: { type: Date, default: Date.now },
 });
 

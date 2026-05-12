@@ -78,7 +78,7 @@ const CandidateExam = () => {
   }, [token]);
 
   useEffect(() => {
-    const setupProctoringSignals = async () => {
+    const setupProctoringSignals = async () => { //setup proctoring signals
       try {
         const stream = await navigator.mediaDevices.getUserMedia({ audio: true, video: true });
         mediaStreamRef.current = stream;
@@ -121,18 +121,18 @@ const CandidateExam = () => {
 
     setupProctoringSignals();
 
-    const onBlur = () => {
+    const onBlur = () => { //user switched to another tab 
       setTabSwitchCount((prev) => prev + 1);
       setWindowFocused(false);
     };
     const onFocus = () => setWindowFocused(true);
-    const onVisibilityChange = () => {
+    const onVisibilityChange = () => { //user minimized the window
       if (document.visibilityState === "hidden") {
         setVisibilityHiddenCount((prev) => prev + 1);
       }
       setWindowFocused(document.visibilityState === "visible" && document.hasFocus());
     };
-    const onFullScreenChange = () => {
+    const onFullScreenChange = () => { //user exited fullscreen mode
       if (!document.fullscreenElement) {
         setFullScreenExitCount((prev) => prev + 1);
       }

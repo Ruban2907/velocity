@@ -58,8 +58,8 @@ const sanitizeQuestionsForCandidate = (assessment) => //to remove sensitive data
     difficulty: question.difficulty,
   }));
 
-const normalizeJsonString = (text) => {
-  return String(text || "")
+const normalizeJsonString = (text) => { //normalizes the text to remove invalid characters
+  return String(text || "") //converts the text to a string
     .replace(/```json|```/gi, "")
     .replace(/[\u2018\u2019]/g, "'")
     .replace(/[\u201C\u201D]/g, '"')
@@ -68,10 +68,10 @@ const normalizeJsonString = (text) => {
     .trim();
 };
 
-const extractLikelyJsonArray = (text) => {
-  const normalized = normalizeJsonString(text);
-  const start = normalized.indexOf("[");
-  const end = normalized.lastIndexOf("]");
+const extractLikelyJsonArray = (text) => { //extracts the json array from the text
+  const normalized = normalizeJsonString(text); //normalizes the text to remove invalid characters
+  const start = normalized.indexOf("["); //finds the starting index of the json array
+  const end = normalized.lastIndexOf("]"); //finds the ending index of the json array
 
   if (start === -1 || end === -1 || end <= start) {
     return normalized;
@@ -80,10 +80,10 @@ const extractLikelyJsonArray = (text) => {
   return normalized.slice(start, end + 1);
 };
 
-const stripTrailingCommas = (text) => text.replace(/,\s*([}\]])/g, "$1");
+const stripTrailingCommas = (text) => text.replace(/,\s*([}\]])/g, "$1"); //removes invalid commas
 
-const callGeminiModel = async (payload) => {
-  const url = `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent?key=${process.env.GEMINI_API_KEY}`;
+const callGeminiModel = async (payload) => { //calls the gemini model to generate the assessment
+  const url = `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent?key=${process.env.GEMINI_API_KEY}`; //url of the gemini model
   const response = await fetch(url, {
     method: "POST",
     headers: {
@@ -114,15 +114,15 @@ const callGeminiModel = async (payload) => {
   throw fatal;
 };
 
-const tryParseQuestions = (text) => {
+const tryParseQuestions = (text) => { //tries to parse the questions from the text of ai response - convert in json obj
   const candidate = stripTrailingCommas(extractLikelyJsonArray(text));
-  const parsed = JSON.parse(candidate);
+  const parsed = JSON.parse(candidate); //converts the text to a json object
 
   if (!Array.isArray(parsed)) {
-    throw new Error("Gemini output is not a JSON array");
+    throw new Error("Gemini output is not a JSON array"); //throws an error if the output is not a json array
   }
 
-  return parsed;
+  return parsed; 
 };
 
 const repairJsonWithGemini = async (rawText) => {
@@ -148,7 +148,7 @@ ${rawText}`;
   return tryParseQuestions(repairedText);
 };
 
-router.post("/generate", authenticate, async (req, res) => {
+router.post("/generate", authenticate, async (req, res) => { //generates the assessment
   try {
     const {
       jobSpecId,
@@ -209,24 +209,24 @@ Respond ONLY with a raw JSON array, no markdown, no backticks, no explanation ou
   }
 ]`;
 
-    const data = await callGeminiModel({
+    const data = await callGeminiModel({ //calls the gemini model to generate the assessment
       contents: [{ parts: [{ text: prompt }] }],
     });
-    const rawText = data?.candidates?.[0]?.content?.parts?.[0]?.text;
+    const rawText = data?.candidates?.[0]?.content?.parts?.[0]?.text; //text of the assessment
 
-    if (!rawText) {
+    if (!rawText) {//throws an error if the response does not include the assessment content
       return res.status(500).json({
         success: false,
         message: "Gemini response did not include assessment content",
       });
     }
 
-    let questions;
+    let questions; 
     try {
-      questions = tryParseQuestions(rawText);
+      questions = tryParseQuestions(rawText); //tries to parse the questions from the text of ai response - convert in js obj
     } catch (parseError) {
       try {
-        questions = await repairJsonWithGemini(rawText);
+        questions = await repairJsonWithGemini(rawText); //repairs the json object if it is not valid
       } catch {
         return res.status(500).json({
           success: false,
@@ -235,7 +235,7 @@ Respond ONLY with a raw JSON array, no markdown, no backticks, no explanation ou
       }
     }
 
-    const savedAssessment = await Assessment.create({
+    const savedAssessment = await Assessment.create({ //save to db
       jobSpecId: jobSpecId || null,
       createdBy: req.user?._id || null,
       jobTitle: stringifyField(jobTitle),
@@ -257,7 +257,7 @@ Respond ONLY with a raw JSON array, no markdown, no backticks, no explanation ou
   }
 });
 
-router.post("/send", authenticate, async (req, res) => {
+router.post("/send", authenticate, async (req, res) => { //email wala kaam hai ye 
   try {
     const { assessmentId, candidateEmail, candidateName } = req.body || {};
 
@@ -329,7 +329,7 @@ router.post("/send", authenticate, async (req, res) => {
   }
 });
 
-router.post("/link", authenticate, async (req, res) => {
+router.post("/link", authenticate, async (req, res) => { //generate assessment link
   try {
     const { assessmentId, candidateEmail, candidateName } = req.body || {};
 
@@ -446,9 +446,9 @@ router.post("/exam/:token/submit", async (req, res) => {
     const questions = attempt.assessmentId.questions || [];
     const safeAnswers = answers && typeof answers === "object" ? answers : {};
 
-    let score = 0;
-    questions.forEach((question, index) => {
-      const expected = String(question.answer || "").trim().toUpperCase();
+    let score = 0; //score of the exam initially 0
+    questions.forEach((question, index) => { //loop through the questions
+      const expected = String(question.answer || "").trim().toUpperCase(); //expected answer
       const submittedRaw = safeAnswers[index] || safeAnswers[String(index)] || "";
       const submitted = String(submittedRaw).trim().toUpperCase();
 
@@ -468,12 +468,12 @@ router.post("/exam/:token/submit", async (req, res) => {
       }
     });
 
-    attempt.answers = safeAnswers;
+    attempt.answers = safeAnswers; //save attempt data here in db
     attempt.score = score;
     attempt.totalQuestions = questions.length;
     attempt.submittedAt = new Date();
     attempt.status = "submitted";
-    attempt.antiCheat = {
+    attempt.antiCheat = { //anti cheat data
       tabSwitchCount: Number(antiCheat?.tabSwitchCount) || 0,
       fullScreenExitCount: Number(antiCheat?.fullScreenExitCount) || 0,
       visibilityHiddenCount: Number(antiCheat?.visibilityHiddenCount) || 0,

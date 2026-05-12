@@ -197,7 +197,12 @@ const JobSpecForm = ({ onSubmit }: JobSpecFormProps) => {
         description: `Successfully loaded ${response.data.data?.length || 0} candidates.`,
       });
     } catch (err: any) {
-      setCandidatesError("Candidate sourcing failed. Please try again.");
+      const message = err?.response?.data?.message || "Candidate sourcing failed. Please try again.";
+      setCandidatesError(message);
+      toast({
+        title: "Candidate sourcing failed",
+        description: message,
+      });
     } finally {
       setLoadingCandidates(false);
       setHasSearched(true);
