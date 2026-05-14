@@ -49,13 +49,22 @@ async function fetchLeadsFromApify(jobData) {
         companySizeIncludes = [...new Set(companySizeIncludes)];
     }
 
-    // Map industry format
-    let companyKeywordIncludes = [];
-    if (jobData.industry && Array.isArray(jobData.industry)) {
-        companyKeywordIncludes = jobData.industry.map(ind => 
-            ind.split('_').map(word => word.charAt(0).toUpperCase() + word.slice(1)).join(' ')
-        );
-    }
+    // Map industry into keywords
+    const INDUSTRY_KEYWORDS = {
+        finance: ["financial services", "fintech", "banking"],
+        information_technology: ["software", "technology", "IT services"],
+        healthcare: ["healthcare", "medical", "hospital"],
+        education: ["education", "e-learning", "edtech"],
+        ecommerce: ["ecommerce", "retail", "online store"],
+        marketing_and_advertising: ["marketing", "advertising", "digital marketing"],
+        manufacturing: ["manufacturing", "industrial", "engineering"],
+        management_consulting: ["consulting", "business consulting"]
+    };
+
+    const companyKeywordIncludes =
+        Array.isArray(jobData.industry)
+            ? jobData.industry.flatMap(ind => INDUSTRY_KEYWORDS[ind] || [ind]).filter(Boolean)
+            : [];
 
     // Convert jobData into Apify JSON input mapping
     const input = {
@@ -66,8 +75,17 @@ async function fetchLeadsFromApify(jobData) {
         companyKeywordIncludes,
         companySizeIncludes,
         hasEmail: typeof jobData.emailRequired === "boolean" ? jobData.emailRequired : false,
-        totalResults: Math.min(100, Math.max(1, jobData.perPage || 25))
+        totalResults: Math.min(100, Math.max(1, jobData.perPage || 25)),
+        includeTitleVariants: true,
+        roleMatchMode: "any",
+        companyMatchMode: "any",
+        companyKeywordMode: "broad",
+        companyDomainMatchMode: "strict",
+        resetProgress: false,
+        dontSaveProgress: false
     };
+
+    console.log("APIFY INPUT:", JSON.stringify(input, null, 2));
 
     // Call Apify actor
     const actorId = "pipelinelabs/lead-scraper-apollo-zoominfo-lusha-ppe";
