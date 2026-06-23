@@ -82,14 +82,34 @@ const extractLikelyJsonArray = (text) => { //extracts the json array from the te
 
 const stripTrailingCommas = (text) => text.replace(/,\s*([}\]])/g, "$1"); //removes invalid commas
 
-const callGeminiModel = async (payload) => { //calls the gemini model to generate the assessment
-  const url = `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent?key=${process.env.GEMINI_API_KEY}`; //url of the gemini model
+const GEMINI_MODELS = [
+  "gemini-2.5-flash",
+  "gemini-2.0-flash",
+  "gemini-2.5-flash-lite"
+];
+
+const OVERLOAD_ERROR_CODES = [503, 429];
+const OVERLOAD_KEYWORDS = [
+  "UNAVAILABLE", "overloaded", "high demand", "try again", 
+  "model is overloaded", "timeout", "AbortError", "ECONNABORTED"
+];
+
+const isOverloadError = (err, status) => {
+  if (OVERLOAD_ERROR_CODES.includes(status)) return true;
+  const msg = String(err.message || "").toLowerCase();
+  return OVERLOAD_KEYWORDS.some(key => msg.includes(key.toLowerCase()));
+};
+
+const delay = (ms) => new Promise(res => setTimeout(res, ms));
+
+const callGeminiModel = async (payload, modelName, signal) => {
+  const url = `https://generativelanguage.googleapis.com/v1beta/models/${modelName}:generateContent?key=${process.env.GEMINI_API_KEY}`;
+  
   const response = await fetch(url, {
     method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-    },
+    headers: { "Content-Type": "application/json" },
     body: JSON.stringify(payload),
+    signal
   });
 
   if (response.ok) {
@@ -97,21 +117,75 @@ const callGeminiModel = async (payload) => { //calls the gemini model to generat
   }
 
   const errorText = await response.text();
-  if (response.status === 503) {
-    const unavailable = new Error("Gemini 2.5 Flash is currently under high demand. Please try again in a moment.");
-    unavailable.status = 503;
-    throw unavailable;
+  const error = new Error(errorText || "Unknown Gemini error");
+  error.status = response.status;
+  throw error;
+};
+
+const generateWithRetry = async (payload) => {
+  const startTime = Date.now();
+  const TOTAL_TIMEOUT_MS = 45000;
+  const REQUEST_TIMEOUT_MS = 30000;
+  
+  let lastError = null;
+  let primaryModel = GEMINI_MODELS[0];
+
+  for (const model of GEMINI_MODELS) {
+    for (let attempt = 1; attempt <= 3; attempt++) {
+      const elapsed = Date.now() - startTime;
+      
+      if (elapsed > TOTAL_TIMEOUT_MS) {
+        const timeoutErr = new Error("AI assessment generation is taking longer than expected. Gemini may be overloaded. Please retry in a moment.");
+        timeoutErr.status = 503;
+        timeoutErr.reason = "gemini_total_timeout";
+        timeoutErr.timeoutMs = TOTAL_TIMEOUT_MS;
+        throw timeoutErr;
+      }
+
+      // Backoff: 0ms, 1500ms, 3000ms
+      if (attempt > 1) {
+        const waitTime = attempt === 2 ? 1500 : 3000;
+        await delay(waitTime);
+      }
+
+      console.log(`GEMINI ATTEMPT: ${model} (Attempt ${attempt}, Elapsed: ${Date.now() - startTime}ms)`);
+      
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
+
+      try {
+        const data = await callGeminiModel(payload, model, controller.signal);
+        clearTimeout(timeoutId);
+        
+        return {
+          data,
+          meta: {
+            modelUsed: model,
+            fallbackUsed: model !== primaryModel,
+            primaryModelFailed: model !== primaryModel ? primaryModel : null,
+            attempts: attempt
+          }
+        };
+      } catch (err) {
+        clearTimeout(timeoutId);
+        lastError = err;
+
+        console.log(`GEMINI FAILED: ${model} (Attempt ${attempt}, Status: ${err.status})`);
+        
+        // If it's NOT an overload error, don't bother retrying this model
+        if (!isOverloadError(err, err.status)) {
+          console.log(`CRITICAL GEMINI ERROR: ${err.message?.slice(0, 200)}`);
+          break; // Move to next model
+        }
+      }
+    }
   }
 
-  if (response.status === 429) {
-    const rateLimited = new Error("API rate limit hit, try again in a moment");
-    rateLimited.status = 429;
-    throw rateLimited;
-  }
-
-  const fatal = new Error(`Gemini request failed: ${errorText || "Unknown error"}`);
-  fatal.status = response.status;
-  throw fatal;
+  const finalErr = new Error("AI assessment generation is temporarily unavailable because Gemini is overloaded. Please retry in a few minutes.");
+  finalErr.status = 503;
+  finalErr.reason = "gemini_capacity_error";
+  finalErr.attemptedModels = GEMINI_MODELS;
+  throw finalErr;
 };
 
 const tryParseQuestions = (text) => { //tries to parse the questions from the text of ai response - convert in json obj
@@ -133,13 +207,13 @@ Do not add markdown, comments, or extra text.
 Content:
 ${rawText}`;
 
-  const repairData = await callGeminiModel({
+  const { data, meta } = await generateWithRetry({
     contents: [{ parts: [{ text: repairPrompt }] }],
     generationConfig: {
       responseMimeType: "application/json",
     },
   });
-  const repairedText = repairData?.candidates?.[0]?.content?.parts?.[0]?.text;
+  const repairedText = data?.candidates?.[0]?.content?.parts?.[0]?.text;
 
   if (!repairedText) {
     throw new Error("Repair response did not contain text");
@@ -209,7 +283,7 @@ Respond ONLY with a raw JSON array, no markdown, no backticks, no explanation ou
   }
 ]`;
 
-    const data = await callGeminiModel({ //calls the gemini model to generate the assessment
+    const { data, meta } = await generateWithRetry({ //calls the gemini model to generate the assessment
       contents: [{ parts: [{ text: prompt }] }],
     });
     const rawText = data?.candidates?.[0]?.content?.parts?.[0]?.text; //text of the assessment
@@ -247,12 +321,21 @@ Respond ONLY with a raw JSON array, no markdown, no backticks, no explanation ou
     return res.status(200).json({
       success: true,
       data: savedAssessment,
+      meta: {
+        ...meta,
+        totalQuestions: questions.length
+      }
     });
   } catch (error) {
     const statusCode = error?.status || 500;
     return res.status(statusCode).json({
       success: false,
       message: error.message || "Failed to generate assessment",
+      meta: {
+        reason: error.reason,
+        attemptedModels: error.attemptedModels,
+        timeoutMs: error.timeoutMs
+      }
     });
   }
 });

@@ -20,9 +20,15 @@ const candidateSchema = new mongoose.Schema({
   companySize: { type: String },
   contactStatus: {
     type: String,
-    enum: ["Not Contacted", "Contacted"],
-    default: "Not Contacted",
+    enum: ["not_contacted", "contacted"],
+    default: "not_contacted",
   },
+  contactedAt: { type: Date },
+  isRemoved: {
+    type: Boolean,
+    default: false,
+  },
+  removedAt: { type: Date },
   matchScore: { type: Number, default: 0 },
   matchLabel: { type: String, default: "Low match" },
   rankingReasons: [{ type: String }],
