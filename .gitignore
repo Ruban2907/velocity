@@ -45,8 +45,10 @@ ai-service/*.pyc
 ai-service/temp.py
 ai-service/*.pdf
 
-# Backend env (never commit real secrets)
+# Env files (never commit real secrets)
+.env
 backend/.env
+frontend/.env
 
 # Local machine start scripts (do not commit)
 start_saad2.ps1

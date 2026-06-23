@@ -11,19 +11,23 @@ const assessmentRoutes = require('./routes/assessmentRoutes');
 const emailTemplateRoutes = require('./routes/emailTemplateRoutes');
 const adminRoutes = require('./routes/adminRoutes');
 const jobRoutes = require('./routes/jobRoutes');
+const candidateRoutes = require('./routes/candidateRoutes');
 const { trackActivity } = require('./middleware/activityMiddleware');
 const { authenticate } = require('./middleware/auth');
 
 const app = express();
 const port = process.env.PORT || 3000;
 
-const allowedOrigins = [
-  process.env.FRONTEND_URL,
+const allowedOrigins = [];
+if (process.env.FRONTEND_URL) {
+  allowedOrigins.push(...process.env.FRONTEND_URL.split(',').map(url => url.trim()));
+}
+allowedOrigins.push(
   'http://localhost:5173',
   'http://localhost:8081',
   'http://localhost:8080',
-  'http://localhost:3000',
-].filter(Boolean);
+  'http://localhost:3000'
+);
 
 const isDevelopment = process.env.NODE_ENV !== 'production';
 
@@ -43,7 +47,9 @@ const corsOptions = {
       isPrivateNetworkOrigin = false;
     }
 
-    if (allowedOrigins.indexOf(origin) !== -1 || isLocalhostOrigin || isPrivateNetworkOrigin) {
+    const uniqueOrigins = [...new Set(allowedOrigins.filter(Boolean))];
+
+    if (uniqueOrigins.indexOf(origin) !== -1 || isLocalhostOrigin || isPrivateNetworkOrigin) {
       callback(null, true);
     } else {
       callback(new Error('Not allowed by CORS'));
@@ -59,7 +65,11 @@ app.use(express.urlencoded({ extended: true, limit: '25mb' }));
 app.use(cookieParser());
 app.use(trackActivity);
 
-connectToMongoDb(process.env.MONGODB_URI || "mongodb://localhost:27017/Velocity")
+if (!process.env.MONGODB_URI) {
+  throw new Error("MONGODB_URI is not defined");
+}
+
+connectToMongoDb(process.env.MONGODB_URI)
   .then(() => {
     console.log('Connected to MongoDB successfully');
   })
@@ -75,9 +85,14 @@ app.use('/api/recruitment', recruitmentRoutes);
 app.use('/api/assessments', assessmentRoutes);
 app.use('/api/email-templates', emailTemplateRoutes);
 app.use('/api/jobs', jobRoutes);
+app.use('/api/candidates', candidateRoutes);
 
 // Admin Routes
 app.use('/api/admin', adminRoutes);
+
+app.get('/', (req, res) => {
+  res.json({ success: true, message: "Backend running" });
+});
 
 app.get('/api/debug-version', (req, res) => {
   res.json({
