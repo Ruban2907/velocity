@@ -1,0 +1,106 @@
+services:
+  mongodb:
+    image: mongo:7.0
+    container_name: velocity-mongodb
+    restart: unless-stopped
+    ports:
+      - "27017:27017"
+    volumes:
+      - mongodb_data:/data/db
+    networks:
+      - velocity-network
+    healthcheck:
+      test: ["CMD", "mongosh", "--quiet", "127.0.0.1:27017/test", "--eval", "db.runCommand('ping').ok"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
+  ai-service:
+    build:
+      context: ./ai-service
+      dockerfile: Dockerfile
+    container_name: velocity-ai-service
+    restart: unless-stopped
+    ports:
+      - "8001:8001"
+    environment:
+      - PORT=8001
+      - PYTHONUNBUFFERED=1
+    networks:
+      - velocity-network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8001/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: velocity-backend
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    environment:
+      - NODE_ENV=production
+      - PORT=3000
+      - MONGODB_URI=mongodb://mongodb:27017/velocity
+      - JWT_SECRET=${JWT_SECRET:-insecure_local_dev_secret_replace_in_production_32char}
+      - JWT_EXPIRES_IN=${JWT_EXPIRES_IN:-7d}
+      - FRONTEND_URL=${FRONTEND_URL:-http://localhost:8080,http://localhost:5173}
+      - AI_SERVICE_URL=http://ai-service:8001
+      - GEMINI_API_KEY=${GEMINI_API_KEY:-}
+      - GEMINI_MODEL=${GEMINI_MODEL:-gemini-2.5-flash}
+      - APIFY_TOKEN=${APIFY_TOKEN:-}
+      - SMTP_HOST=${SMTP_HOST:-}
+      - SMTP_PORT=${SMTP_PORT:-587}
+      - SMTP_USER=${SMTP_USER:-}
+      - SMTP_PASS=${SMTP_PASS:-}
+      - SMTP_FROM=${SMTP_FROM:-}
+      - EXAM_BASE_URL=${EXAM_BASE_URL:-http://localhost:8080}
+    depends_on:
+      mongodb:
+        condition: service_healthy
+      ai-service:
+        condition: service_healthy
+    networks:
+      - velocity-network
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:3000/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+      args:
+        - VITE_API_URL=${VITE_API_URL:-}
+    container_name: velocity-frontend
+    restart: unless-stopped
+    ports:
+      - "8080:8080"
+    depends_on:
+      backend:
+        condition: service_healthy
+    networks:
+      - velocity-network
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:8080/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+
+volumes:
+  mongodb_data:
+    driver: local
+
+networks:
+  velocity-network:
+    driver: bridge

@@ -5,7 +5,9 @@ const crypto = require("crypto");
  * Lowercases, trims, removes empties, and sorts arrays.
  */
 function normalizeCandidateSearchInput(input) {
+  if (!input || typeof input !== "object") return {};
   const allowedFields = [
+
     "personTitleIncludes",
     "personLocationCityIncludes",
     "personLocationCountryIncludes",

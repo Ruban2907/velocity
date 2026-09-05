@@ -30,6 +30,34 @@ const trackActivity = async (req, res, next) => {
     // e.g. /admin/users -> admin
     const feature = urlParts[2] || urlParts[1] || 'root';
     
+    const isSensitiveKey = (k) => {
+      const lower = String(k || '').toLowerCase();
+      return (
+        lower.includes('token') ||
+        lower.includes('password') ||
+        lower.includes('pass') ||
+        lower.includes('secret') ||
+        lower.includes('auth') ||
+        lower.includes('key') ||
+        lower.includes('cookie')
+      );
+    };
+
+    const sanitizeMetadataObj = (obj) => {
+      if (!obj || typeof obj !== 'object') return obj;
+      const out = {};
+      for (const [k, v] of Object.entries(obj)) {
+        if (isSensitiveKey(k)) {
+          out[k] = '[REDACTED]';
+        } else if (v && typeof v === 'object') {
+          out[k] = sanitizeMetadataObj(v);
+        } else {
+          out[k] = v;
+        }
+      }
+      return out;
+    };
+
     // Perform async logging without blocking the response
     logActivity({
       userId: req.user._id,
@@ -39,13 +67,14 @@ const trackActivity = async (req, res, next) => {
         path: req.originalUrl,
         statusCode: res.statusCode,
         method: req.method,
-        // We avoid logging large request bodies for security and performance
-        params: req.params,
-        query: req.query,
+        // We avoid logging sensitive query/params and large request bodies
+        params: sanitizeMetadataObj(req.params),
+        query: sanitizeMetadataObj(req.query),
       },
       ip: req.ip || req.headers['x-forwarded-for'],
       userAgent: req.headers['user-agent']
     });
+
   });
 
   next();

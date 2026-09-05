@@ -11,7 +11,8 @@ router.get("/", authenticate, async (req, res) => {
   try {
     const { q, jobId, jobIds, contactStatus, page = 1, limit = 20 } = req.query;
 
-    console.log("GET /api/candidates filters:", { q, jobId, jobIds, contactStatus, page, limit });
+    const safePage = Math.max(1, parseInt(page, 10) || 1);
+    const safeLimit = Math.min(Math.max(1, parseInt(limit, 10) || 20), 100);
 
     const query = { isRemoved: { $ne: true } };
 
@@ -38,17 +39,15 @@ router.get("/", authenticate, async (req, res) => {
       ];
     }
 
-    const skip = (parseInt(page) - 1) * parseInt(limit);
+    const skip = (safePage - 1) * safeLimit;
     
     const candidates = await Candidate.find(query)
       .populate("jobId", "jobTitle")
       .sort({ createdAt: -1 })
       .skip(skip)
-      .limit(parseInt(limit));
+      .limit(safeLimit);
 
     const total = await Candidate.countDocuments(query);
-
-    console.log("CANDIDATES RETURNED:", candidates.length);
 
     return res.status(200).json({
       success: true,
@@ -56,8 +55,8 @@ router.get("/", authenticate, async (req, res) => {
       data: candidates, // backwards compatibility
       meta: {
         total,
-        page: parseInt(page),
-        limit: parseInt(limit),
+        page: safePage,
+        limit: safeLimit,
       },
     });
   } catch (error) {
@@ -73,13 +72,63 @@ router.get("/", authenticate, async (req, res) => {
 // Return job specs that have non-removed candidates, grouped by normalized title
 router.get("/job-filters", authenticate, async (req, res) => {
   try {
-    // 1. Get all candidates that are not removed and populate job info
+    let jobCounts = null;
+    try {
+      jobCounts = await Candidate.aggregate([
+        { $match: { isRemoved: { $ne: true }, jobId: { $ne: null } } },
+        { $group: { _id: "$jobId", count: { $sum: 1 } } }
+      ]);
+    } catch {
+      jobCounts = null;
+    }
+
+    if (Array.isArray(jobCounts)) {
+      const jobIds = jobCounts.map(jc => jc._id);
+      const jobs = await JobSpec.find({ _id: { $in: jobIds } }).select("jobTitle");
+      const jobMap = new Map();
+      jobs.forEach(j => jobMap.set(j._id.toString(), j));
+
+      const groupedFilters = new Map();
+      const normalize = (t) => t.trim().toLowerCase().replace(/\s+/g, " ");
+      const toTitleCase = (t) => t.split(" ").map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(" ");
+
+      for (const jc of jobCounts) {
+        const job = jobMap.get(jc._id.toString());
+        if (!job) continue;
+        const rawTitle = Array.isArray(job.jobTitle) ? job.jobTitle[0] : job.jobTitle;
+        if (!rawTitle) continue;
+
+        const key = normalize(rawTitle);
+        if (!groupedFilters.has(key)) {
+          groupedFilters.set(key, {
+            key,
+            title: toTitleCase(key),
+            candidateCount: 0,
+            jobIds: new Set()
+          });
+        }
+        const group = groupedFilters.get(key);
+        group.candidateCount += jc.count;
+        group.jobIds.add(jc._id.toString());
+      }
+
+      const filters = Array.from(groupedFilters.values()).map(f => ({
+        ...f,
+        jobIds: Array.from(f.jobIds)
+      })).sort((a, b) => b.candidateCount - a.candidateCount);
+
+      return res.status(200).json({
+        success: true,
+        filters,
+      });
+    }
+
+    // Fallback: in-memory grouping for environments where aggregate is unavailable
     const candidates = await Candidate.find({ isRemoved: { $ne: true } })
       .populate("jobId", "jobTitle")
       .select("jobId");
 
     const groupedFilters = new Map();
-
     const normalize = (t) => t.trim().toLowerCase().replace(/\s+/g, " ");
     const toTitleCase = (t) => t.split(" ").map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(" ");
 
@@ -115,13 +164,14 @@ router.get("/job-filters", authenticate, async (req, res) => {
       filters,
     });
   } catch (error) {
-    console.error("Error fetching job filters:", error);
+    console.error("Error fetching job filters:", error.message || error);
     return res.status(500).json({
       success: false,
       message: "Failed to fetch job filters",
     });
   }
 });
+
 
 // PATCH /api/candidates/:id/contacted
 router.patch("/:id/contacted", authenticate, async (req, res) => {

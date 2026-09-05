@@ -106,7 +106,23 @@ const purgeActivities = async (req, res) => {
  */
 const getAllRecruiters = async (req, res) => {
   try {
-    const users = await User.find({ _id: { $ne: req.user._id } }).select('-password').sort({ createdAt: -1 });
+    const page = Math.max(1, parseInt(req.query.page, 10) || 1);
+    const limit = Math.min(Math.max(1, parseInt(req.query.limit, 10) || 100), 200);
+    const skip = (page - 1) * limit;
+
+    let query = User.find({ _id: { $ne: req.user._id } })
+      .select('-password')
+      .sort({ createdAt: -1 });
+
+    if (query && typeof query.skip === 'function') {
+      query = query.skip(skip);
+    }
+    if (query && typeof query.limit === 'function') {
+      query = query.limit(limit);
+    }
+
+    const users = await query;
+
     res.status(200).json({
       success: true,
       data: users
@@ -281,11 +297,14 @@ const getActivityLogs = async (req, res) => {
       if (endDate) filter.createdAt.$lte = new Date(endDate);
     }
 
+    const safeLimit = Math.min(Math.max(1, parseInt(limit, 10) || 50), 100);
+    const safeSkip = Math.max(0, parseInt(skip, 10) || 0);
+
     const logs = await Activity.find(filter)
       .populate('userId', 'firstname lastname email')
       .sort({ createdAt: -1 })
-      .limit(parseInt(limit))
-      .skip(parseInt(skip));
+      .skip(safeSkip)
+      .limit(safeLimit);
 
     const total = await Activity.countDocuments(filter);
 
@@ -294,8 +313,8 @@ const getActivityLogs = async (req, res) => {
       data: logs,
       pagination: {
         total,
-        limit: parseInt(limit),
-        skip: parseInt(skip)
+        limit: safeLimit,
+        skip: safeSkip
       }
     });
   } catch (error) {

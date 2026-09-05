@@ -7,8 +7,8 @@ import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Progress } from "@/components/ui/progress";
 import { UploadCloud, FileText, Loader2, Download } from "lucide-react";
+import api from "@/lib/api";
 
-const API_URL = import.meta.env.VITE_API_URL || "http://localhost:3000";
 
 const positionOptions = [
   "Software Engineer",
@@ -80,29 +80,21 @@ const ResumeParser = () => {
     setLoading(true);
     try {
       const documentBase64 = await toBase64(file);
-      const response = await fetch(`${API_URL}/api/resume/parse`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          documentBase64,
-          fileName: file.name,
-          position,
-          description,
-        }),
+      const response = await api.post("/resume/parse", {
+        documentBase64,
+        fileName: file.name,
+        position,
+        description,
       });
 
-      if (!response.ok) {
-        const data = await response.json().catch(() => ({}));
-        throw new Error(data.message || "Failed to parse resume");
-      }
-
-      const data = await response.json();
-      setResult(data.data || data);
+      setResult(response.data?.data || response.data);
     } catch (err: any) {
-      setError(err.message || "Something went wrong");
+      const errorMessage = err?.response?.data?.message || err?.message || "Something went wrong";
+      setError(errorMessage);
     } finally {
       setLoading(false);
     }
+
   };
 
   return (

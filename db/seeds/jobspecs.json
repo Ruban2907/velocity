@@ -1,0 +1,33 @@
+[
+  {
+    "jobTitle": [
+      "Senior Full Stack Engineer"
+    ],
+    "location": [
+      "San Francisco, CA",
+      "Remote"
+    ],
+    "seniority": [
+      "senior"
+    ],
+    "industry": [
+      "information_technology"
+    ],
+    "companySize": [
+      "51,200"
+    ],
+    "keywords": "React, Node.js, TypeScript, Cloud",
+    "emailRequired": true,
+    "perPage": 25,
+    "postFilters": {
+      "skills": [
+        "React",
+        "Node.js",
+        "TypeScript",
+        "MongoDB"
+      ],
+      "minExperienceYears": 5,
+      "education": "Bachelor in Computer Science"
+    }
+  }
+]

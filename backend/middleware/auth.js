@@ -26,25 +26,26 @@ const authenticate = async (req, res, next) => {
     req.user = user;
     next();
   } catch (error) {
-    if (error.name === 'JsonWebTokenError') {
+    if (error.name === 'JsonWebTokenError' || error.name === 'NotBeforeError' || error.name === 'SyntaxError') {
       return res.status(401).json({ 
         success: false, 
-        message: 'Invalid token.' 
+        message: 'Invalid or malformed authentication token.' 
       });
     }
     if (error.name === 'TokenExpiredError') {
       return res.status(401).json({ 
         success: false, 
-        message: 'Token has expired. Please login again.' 
+        message: 'Token has expired. Please log in again.' 
       });
     }
-    return res.status(500).json({ 
+    console.error('[AUTH ERROR] Authentication middleware failure:', error.message);
+    return res.status(401).json({ 
       success: false, 
-      message: 'Authentication error', 
-      error: error.message 
+      message: 'Authentication failed. Please provide a valid token.' 
     });
   }
 };
+
 
 const adminOnly = (req, res, next) => {
   if (req.user && req.user.role === 'admin') {

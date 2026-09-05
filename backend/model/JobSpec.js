@@ -14,8 +14,15 @@ const jobSpecSchema = new mongoose.Schema({
     minExperienceYears: Number,
     education: String,
   },
+  createdBy: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: "user",
+    default: null,
+    index: true,
+  },
   createdAt: { type: Date, default: Date.now },
 });
+
 
 const JobSpec = mongoose.model("JobSpec", jobSpecSchema);
 module.exports = JobSpec;

@@ -1,0 +1,18 @@
+[
+  {
+    "firstname": "Admin",
+    "lastname": "User",
+    "companyname": "Velocity Inc",
+    "email": "admin@example.com",
+    "password": "\\.uY7pA8s9s1w2o3r4d5P6a7s8s9w0o1r2",
+    "role": "admin"
+  },
+  {
+    "firstname": "Jane",
+    "lastname": "Recruiter",
+    "companyname": "Acme Talent",
+    "email": "recruiter@example.com",
+    "password": "\\.uY7pA8s9s1w2o3r4d5P6a7s8s9w0o1r2",
+    "role": "user"
+  }
+]

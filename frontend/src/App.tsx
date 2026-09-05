@@ -14,6 +14,7 @@ import Profile from "./pages/Profile";
 import Login from "./pages/Login";
 import Signup from "./pages/Signup";
 import ForgotPassword from "./pages/ForgotPassword";
+import ResetPassword from "./pages/ResetPassword";
 import Features from "./pages/Features";
 import HowItWorks from "./pages/HowItWorks";
 import Technology from "./pages/Technology";
@@ -44,6 +45,8 @@ const App = () => (
             <Route path="/login" element={<Login />} />
             <Route path="/signup" element={<Signup />} />
             <Route path="/forgot-password" element={<ForgotPassword />} />
+            <Route path="/reset-password" element={<ResetPassword />} />
+
             <Route path="/features" element={<Features />} />
             <Route path="/how-it-works" element={<HowItWorks />} />
             <Route path="/technology" element={<Technology />} />

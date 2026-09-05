@@ -2,13 +2,16 @@ const express = require("express");
 const { fetchLeadsFromApify, buildApifyInput } = require("../services/apifyLeadService");
 const JobSpec = require("../model/JobSpec");
 const Candidate = require("../model/Candidate");
-const SearchCache = require("../models/SearchCache");
+const SearchCache = require("../model/SearchCache");
 const {
   normalizeCandidateSearchInput,
   createSearchHash
 } = require("../utils/cacheHelper");
+const { authenticate } = require("../middleware/auth");
+const { searchLimiter } = require("../middleware/rateLimiter");
 
 const router = express.Router();
+
 
 function sendCandidateResponse(res, {
   success = true,
@@ -132,7 +135,7 @@ const rankCandidate = (candidate, jobData) => {
   };
 };
 
-router.post("/search", async (req, res) => {
+router.post("/search", authenticate, searchLimiter, async (req, res) => {
   try {
     const { jobId } = req.body || {};
 
@@ -152,6 +155,15 @@ router.post("/search", async (req, res) => {
         status: 404
       });
     }
+
+    // Authorization check: recruiter must own the job spec or be an admin
+    if (jobData.createdBy && req.user.role !== 'admin' && !jobData.createdBy.equals(req.user._id)) {
+      return res.status(403).json({
+        success: false,
+        message: "Access denied. You do not have permission to search candidates for this job specification.",
+      });
+    }
+
 
     // 3. Check existing candidates
     const existingCandidates = await Candidate.find({ jobId });
@@ -211,7 +223,7 @@ router.post("/search", async (req, res) => {
       rawLeads = apifyResult.items;
       apifyMetadata = apifyResult.metadata;
     } catch (apifyError) {
-      console.error("Apify execution error:", apifyError);
+      console.error("Apify execution error:", apifyError?.message || apifyError);
       return sendCandidateResponse(res, {
         success: false,
         message: apifyError?.message || "Lead sourcing failed",
@@ -242,9 +254,6 @@ router.post("/search", async (req, res) => {
     const rejectReasons = [];
     
     console.log("RAW APIFY LEADS COUNT:", rawLeads.length);
-    if (rawLeads.length > 0) {
-      console.log("RAW FIRST LEAD:", JSON.stringify(rawLeads[0], null, 2));
-    }
 
     for (const lead of rawLeads) {
       if (lead.rowType === "diagnostic") {
@@ -306,12 +315,6 @@ router.post("/search", async (req, res) => {
 
     const cleanedCount = cleanedLeads.length;
     console.log("CLEANED LEADS COUNT:", cleanedCount);
-    console.log("CLEANED FIRST 3 TITLES:", cleanedLeads.slice(0, 3).map(c => ({
-      name: c.name,
-      title: c.title,
-      company: c.companyName,
-      email: c.email
-    })));
 
     if (rawLeads.length > 0 && cleanedCount === 0) {
       return sendCandidateResponse(res, {
@@ -464,7 +467,8 @@ router.post("/search", async (req, res) => {
       candidatesToInsert.push({
         ...lead,
         jobId,
-        contactStatus: "Not Contacted",
+        contactStatus: "not_contacted",
+
         matchScore: ranking.score,
         matchLabel: ranking.label,
         rankingReasons: ranking.reasons,
@@ -514,7 +518,7 @@ router.post("/search", async (req, res) => {
       meta: finalMeta
     });
   } catch (error) {
-    console.error("FULL recruitment search error:", error);
+    console.error("FULL recruitment search error:", error?.message || error);
     return sendCandidateResponse(res, {
       success: false,
       message: "An unexpected error occurred during lead sourcing",
@@ -523,7 +527,7 @@ router.post("/search", async (req, res) => {
   }
 });
 
-router.get("/candidates", async (req, res) => {
+router.get("/candidates", authenticate, async (req, res) => {
   try {
     const { jobId } = req.query;
 
@@ -534,7 +538,14 @@ router.get("/candidates", async (req, res) => {
       });
     }
 
-    const candidates = await Candidate.find({ jobId }).sort({ matchScore: -1, createdAt: -1 });
+    const page = Math.max(1, parseInt(req.query.page, 10) || 1);
+    const limit = Math.min(Math.max(1, parseInt(req.query.limit, 10) || 100), 200);
+    const skip = (page - 1) * limit;
+
+    const candidates = await Candidate.find({ jobId })
+      .sort({ matchScore: -1, createdAt: -1 })
+      .skip(skip)
+      .limit(limit);
 
     return res.status(200).json({
       success: true,
@@ -558,7 +569,7 @@ router.get("/candidates", async (req, res) => {
   }
 });
 
-router.put("/candidates/:id/contacted", async (req, res) => {
+router.put("/candidates/:id/contacted", authenticate, async (req, res) => {
   try {
     const candidate = await Candidate.findByIdAndUpdate(
       req.params.id,
@@ -577,9 +588,10 @@ router.put("/candidates/:id/contacted", async (req, res) => {
   }
 });
 
-router.delete("/candidates/:id", async (req, res) => {
+router.delete("/candidates/:id", authenticate, async (req, res) => {
   try {
     const candidate = await Candidate.findByIdAndDelete(req.params.id);
+
     
     if (!candidate) {
       return res.status(404).json({ success: false, message: "Candidate not found" });

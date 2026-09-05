@@ -1,0 +1,86 @@
+name: Docker Build & Smoke Test
+
+on:
+  push:
+    branches: [ main, master ]
+  pull_request:
+    branches: [ main, master ]
+
+permissions:
+  contents: read
+
+jobs:
+  docker-validation:
+    name: Docker Build & Compose Smoke Test
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Validate Docker Compose specification
+        run: docker compose config
+
+      - name: Build AI Service Docker image
+        run: docker build -t velocity-ai-service:ci ./ai-service
+
+      - name: Build Backend Docker image
+        run: docker build -t velocity-backend:ci ./backend
+
+      - name: Build Frontend Docker image
+        run: docker build -t velocity-frontend:ci ./frontend
+
+      - name: Start services via Docker Compose
+        run: docker compose up -d
+
+      - name: Wait for services & probe health endpoints
+        run: |
+          echo "Waiting for services to report ready and healthy..."
+          MAX_ATTEMPTS=30
+          ATTEMPT=0
+          ALL_READY=false
+
+          while [ $ATTEMPT -lt $MAX_ATTEMPTS ]; do
+            ATTEMPT=$((ATTEMPT + 1))
+            AI_STATUS=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:8001/health || echo "down")
+            BACKEND_LIVE=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:3000/health/live || echo "down")
+            BACKEND_READY=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:3000/api/health || echo "down")
+            FRONTEND_LIVE=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:8080/health || echo "down")
+            FRONTEND_PROXY=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:8080/api/health || echo "down")
+
+            echo "Attempt $ATTEMPT/$MAX_ATTEMPTS - AI: $AI_STATUS, Backend Live: $BACKEND_LIVE, Backend Ready: $BACKEND_READY, Frontend Live: $FRONTEND_LIVE, Frontend Proxy: $FRONTEND_PROXY"
+
+            if [ "$AI_STATUS" = "200" ] && [ "$BACKEND_LIVE" = "200" ] && [ "$BACKEND_READY" = "200" ] && [ "$FRONTEND_LIVE" = "200" ] && [ "$FRONTEND_PROXY" = "200" ]; then
+              ALL_READY=true
+              break
+            fi
+            sleep 3
+          done
+
+          if [ "$ALL_READY" != "true" ]; then
+            echo "Error: One or more services failed to report ready within timeout."
+            exit 1
+          fi
+
+          echo "Verifying application endpoints and semantics..."
+          # 1. AI Service Liveness
+          curl --fail -s http://localhost:8001/health > /dev/null || { echo "AI Service health probe failed"; exit 1; }
+          # 2. Backend Process Liveness (Node process active)
+          curl --fail -s http://localhost:3000/health/live > /dev/null || { echo "Backend liveness probe failed"; exit 1; }
+          # 3. Backend Database Readiness (MongoDB connection confirmed)
+          curl --fail -s http://localhost:3000/api/health > /dev/null || { echo "Backend database readiness probe failed"; exit 1; }
+          curl --fail -s http://localhost:3000/health > /dev/null || { echo "Backend /health probe failed"; exit 1; }
+          # 4. Frontend Nginx Container Liveness (Nginx webserver active)
+          curl --fail -s http://localhost:8080/health > /dev/null || { echo "Frontend Nginx liveness probe failed"; exit 1; }
+          # 5. Frontend SPA Entrypoint
+          curl --fail -s http://localhost:8080/ > /dev/null || { echo "Frontend root HTML request failed"; exit 1; }
+          # 6. Frontend to Backend Reverse Proxy (/api -> backend:3000)
+          curl --fail -s http://localhost:8080/api/health > /dev/null || { echo "Frontend Nginx API reverse proxy probe failed"; exit 1; }
+          echo "All Docker Compose services and reverse proxy routes verified successfully!"
+
+      - name: Dump container logs on failure
+        if: failure()
+        run: docker compose logs --no-color
+
+      - name: Teardown Docker Compose services
+        if: always()
+        run: docker compose down -v

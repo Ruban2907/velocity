@@ -67,7 +67,7 @@ const Dashboard = () => {
               </div>
               <div>
                 <h3 className="font-semibold text-foreground mb-1">Source Candidates</h3>
-                <p className="text-sm text-muted-foreground">Find talent via Apollo</p>
+                <p className="text-sm text-muted-foreground">Automated talent discovery</p>
               </div>
             </div>
           </Card>

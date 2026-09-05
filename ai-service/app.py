@@ -1,4 +1,5 @@
 import base64
+import binascii
 import tempfile
 import re
 import os
@@ -7,6 +8,8 @@ from pypdf import PdfReader
 from docx import Document
 
 app = Flask(__name__)
+# Protect against unbounded memory allocation from oversized uploads (10MB limit)
+app.config['MAX_CONTENT_LENGTH'] = 10 * 1024 * 1024
 
 
 def extract_text_fast(file_path: str, is_pdf: bool) -> str:
@@ -470,60 +473,108 @@ def read_file_from_request():
     if request.content_type and "multipart/form-data" in request.content_type:
         f = request.files.get("resume") or request.files.get("file")
         if not f:
-            return None, None
-        return f.read(), f.filename or "resume.pdf"
+            return None, None, "No file provided in multipart upload"
+        return f.read(), f.filename or "resume.pdf", None
     
     # JSON with base64
     data = request.get_json(force=True, silent=True) or {}
     b64 = data.get("documentBase64")
     filename = data.get("fileName", "resume.pdf")
-    if not b64:
-        return None, None
-    return base64.b64decode(b64), filename
+    if not b64 or not isinstance(b64, str):
+        return None, None, "documentBase64 is required and must be a base64-encoded string"
+    
+    # Strip optional data URI prefix if provided
+    if "," in b64 and ";base64" in b64:
+        b64 = b64.split(",", 1)[1]
+    
+    try:
+        decoded = base64.b64decode(b64.strip(), validate=True)
+        return decoded, filename, None
+    except (binascii.Error, ValueError) as err:
+        return None, None, "Invalid base64 encoding for documentBase64"
 
 
 @app.route("/parse", methods=["POST"])
 def parse_single():
     """Parse a single resume file."""
-    file_bytes, filename = read_file_from_request()
+    file_bytes, filename, err_msg = read_file_from_request()
     
     if not file_bytes:
-        return jsonify({"success": False, "message": "No file provided"}), 400
+        return jsonify({"success": False, "message": err_msg or "No file provided"}), 400
 
+    filename_lower = (filename or "").lower().strip()
+    is_pdf = filename_lower.endswith(".pdf") or file_bytes.startswith(b"%PDF")
+    is_docx = filename_lower.endswith(".docx") or file_bytes.startswith(b"PK\x03\x04")
+
+    if not is_pdf and not is_docx:
+        return jsonify({
+            "success": False,
+            "message": "Unsupported file format. Only PDF (.pdf) and Word (.docx) documents are accepted."
+        }), 400
+
+    suffix = ".pdf" if is_pdf else ".docx"
+    tmp_path = None
     try:
-        # Determine file type
-        is_pdf = filename.lower().endswith(".pdf")
-        suffix = ".pdf" if is_pdf else ".docx"
-        
-        # Write to temp file
+        # Write to temp file safely
         with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tmp:
             tmp.write(file_bytes)
             tmp_path = tmp.name
 
-        try:
-            # Fast path first (pypdf/python-docx), fallback to unstructured if needed.
-            text = extract_text_fast(tmp_path, is_pdf)
-            if not text or len(text.strip()) < 50:
-                text = extract_text_fallback_unstructured(tmp_path, is_pdf)
-            
-            # Extract structured fields
-            parsed = extract_fields(text)
-            
-            return jsonify({"success": True, "data": parsed})
-        finally:
-            # Clean up temp file
-            if os.path.exists(tmp_path):
-                os.unlink(tmp_path)
-                
+        # Fast path first (pypdf/python-docx), fallback to unstructured if needed.
+        text = extract_text_fast(tmp_path, is_pdf)
+        if not text or len(text.strip()) < 50:
+            text = extract_text_fallback_unstructured(tmp_path, is_pdf)
+
+        # Extract structured fields
+        parsed = extract_fields(text)
+        
+        return jsonify({"success": True, "data": parsed}), 200
     except Exception as e:
-        return jsonify({"success": False, "message": str(e)}), 400
+        clean_msg = re.sub(r"/tmp/[^\s]+", "[temp_file]", str(e))
+        return jsonify({"success": False, "message": f"Resume parsing failed: {clean_msg}"}), 500
+    finally:
+        # Clean up temp file deterministically
+        if tmp_path and os.path.exists(tmp_path):
+            try:
+                os.unlink(tmp_path)
+            except OSError:
+                pass
 
 
 @app.route("/parse-batch", methods=["POST"])
 def parse_batch():
     """Parse multiple resume files (batch processing)."""
-    # For now, return not implemented
     return jsonify({"success": False, "message": "Batch parsing not yet implemented"}), 501
+
+
+@app.route("/health", methods=["GET"])
+@app.route("/", methods=["GET"])
+def health():
+    return jsonify({"status": "healthy", "service": "ai-service"}), 200
+
+
+@app.errorhandler(413)
+def request_entity_too_large(error):
+    return jsonify({
+        "success": False,
+        "message": "Uploaded file exceeds the maximum allowed size limit of 10MB."
+    }), 413
+
+
+@app.errorhandler(404)
+def not_found(error):
+    return jsonify({
+        "success": False,
+        "message": "The requested endpoint was not found on this service."
+    }), 404
+
+
+@app.errorhandler(500)
+def internal_server_error(error):
+    return jsonify({
+        "success": False,
+        "message": "An internal server error occurred within the AI parsing service."
+    }), 500
 
 
 if __name__ == "__main__":

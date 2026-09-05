@@ -40,7 +40,7 @@ const handleSignup = async (req, res) => {
       data: user
     });
   } catch (error) {
-    console.error('Signup error:', error);
+    console.error('Signup error:', error.message);
     
     if (error.message === 'User with this email already exists') {
       return res.status(409).json({
@@ -52,15 +52,13 @@ const handleSignup = async (req, res) => {
     if (error.name === 'MongoServerError' || error.name === 'MongoNetworkError') {
       return res.status(503).json({
         success: false,
-        message: 'Database connection error. Please check if MongoDB is running.',
-        error: process.env.NODE_ENV === 'development' ? error.message : undefined
+        message: 'Database service unavailable. Please try again later.'
       });
     }
     
     res.status(500).json({
       success: false,
-      message: 'Error during signup',
-      error: process.env.NODE_ENV === 'development' ? error.message : 'Internal server error'
+      message: 'An unexpected error occurred during signup.'
     });
   }
 };
@@ -100,22 +98,23 @@ const handleSignin = async (req, res) => {
         message: error.message
       });
     }
+    console.error('Signin error:', error.message);
     res.status(500).json({
       success: false,
-      message: 'Error during signin',
-      error: error.message
+      message: 'An unexpected error occurred during signin.'
     });
   }
 };
 
+
 const handleForgotPassword = async (req, res) => {
   try {
-    const { email, password } = req.body;
+    const { email } = req.body || {};
 
-    if (!email || !password) {
+    if (!email) {
       return res.status(400).json({
         success: false,
-        message: 'Please provide email and new password'
+        message: 'Please provide an email address'
       });
     }
 
@@ -127,31 +126,44 @@ const handleForgotPassword = async (req, res) => {
       });
     }
 
-    if (password.length < 6) {
+    const result = await authService.requestPasswordReset(email);
+    return res.status(200).json(result);
+  } catch (error) {
+    console.error('Forgot password error:', error.message);
+    // Generic message to prevent enumeration or implementation leakage
+    return res.status(200).json({
+      success: true,
+      message: 'If an account exists for this email, a password reset link has been sent.'
+    });
+  }
+};
+
+const handleResetPassword = async (req, res) => {
+  try {
+    const { token, password } = req.body || {};
+
+    if (!token || typeof token !== 'string') {
+      return res.status(400).json({
+        success: false,
+        message: 'A valid password reset token is required'
+      });
+    }
+
+    if (!password || password.length < 6) {
       return res.status(400).json({
         success: false,
         message: 'Password must be at least 6 characters long'
       });
     }
 
-    const user = await authService.resetPassword(email, password);
-
-    res.status(200).json({
-      success: true,
-      message: 'Password updated successfully',
-      data: user
-    });
+    const result = await authService.resetPasswordWithToken(token, password);
+    return res.status(200).json(result);
   } catch (error) {
-    if (error.message === 'User not found') {
-      return res.status(404).json({
-        success: false,
-        message: error.message
-      });
-    }
-    res.status(500).json({
+    console.error('Password reset error:', error.message);
+    const statusCode = error.statusCode || 400;
+    return res.status(statusCode).json({
       success: false,
-      message: 'Error resetting password',
-      error: error.message
+      message: error.message || 'Unable to reset password. The link may be invalid or expired.'
     });
   }
 };
@@ -171,8 +183,7 @@ const handleLogout = async (req, res) => {
   } catch (error) {
     res.status(500).json({
       success: false,
-      message: 'Error during logout',
-      error: error.message
+      message: 'Error during logout'
     });
   }
 };
@@ -181,6 +192,8 @@ module.exports = {
   handleSignup,
   handleSignin,
   handleForgotPassword,
+  handleResetPassword,
   handleLogout
 };
+
 

@@ -1,0 +1,16 @@
+node_modules
+npm-debug.log*
+.git
+.gitignore
+.env
+.env.*
+!.env.example
+coverage
+tests
+*.test.js
+jest.config.js
+scripts
+scratch
+Dockerfile*
+.dockerignore
+README.md

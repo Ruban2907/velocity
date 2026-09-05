@@ -251,7 +251,7 @@ Required backend env values:
 - `GEMINI_MODEL=gemini-2.5-flash`
 
 Optional/related:
-- `APOLLO_API_KEY` (candidate sourcing, currently bypassed in direct test flow)
+- `APIFY_TOKEN` (candidate lead sourcing via Apify actor)
 
 SMTP for email invite flow:
 - `SMTP_HOST`

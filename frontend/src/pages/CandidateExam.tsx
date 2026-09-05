@@ -6,6 +6,8 @@ import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 
+import { getApiBaseUrl } from "@/lib/api";
+
 interface CandidateQuestion {
   question: string;
   options: string[];
@@ -20,7 +22,7 @@ interface ExamPayload {
   questions: CandidateQuestion[];
 }
 
-const API_URL = import.meta.env.VITE_API_URL || "http://localhost:3000";
+const API_URL = getApiBaseUrl();
 const POLICY_GRACE_SECONDS = 20;
 const EXAM_DURATION_SECONDS = 30 * 60;
 

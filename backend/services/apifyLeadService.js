@@ -138,11 +138,13 @@ function buildApifyInput(jobData) {
 }
 
 async function fetchLeadsFromApify(jobData) {
-    if (!process.env.APIFY_TOKEN) {
-        const err = new Error("APIFY_TOKEN is missing in backend environment.");
+    const token = process.env.APIFY_TOKEN;
+    if (!token || token === 'your_apify_token_here' || token.startsWith('your_')) {
+        const err = new Error("APIFY_TOKEN is missing or set to placeholder in backend environment. Please configure a valid Apify API token.");
         err.statusCode = 500;
         throw err;
     }
+
 
     const input = buildApifyInput(jobData);
     console.log("APIFY INPUT:", JSON.stringify(input, null, 2));
@@ -151,16 +153,13 @@ async function fetchLeadsFromApify(jobData) {
     const actorId = "pipelinelabs/lead-scraper-apollo-zoominfo-lusha-ppe";
     const run = await client.actor(actorId).call(input);
 
-    console.log("APIFY RUN:", JSON.stringify(run, null, 2));
-    console.log("APIFY RUN STATUS:", run.status);
-    console.log("APIFY LEADS RETURNED EVENT:", run.chargedEventCounts?.["lead-returned"]);
+    console.log("APIFY RUN ID:", run.id, "STATUS:", run.status);
     console.log("APIFY DATASET ID:", run.defaultDatasetId);
 
     // Fetch dataset
     const { items } = await client.dataset(run.defaultDatasetId).listItems();
 
     console.log("DATASET RAW COUNT:", items.length);
-    console.log("DATASET FIRST 3 ITEMS:", JSON.stringify(items.slice(0, 3), null, 2));
 
     // Filter out diagnostic rows before returning
     const realItems = items.filter(
@@ -168,9 +167,6 @@ async function fetchLeadsFromApify(jobData) {
     );
 
     console.log("REAL ITEMS COUNT:", realItems.length);
-    if (realItems.length > 0) {
-        console.log("REAL FIRST ITEM:", JSON.stringify(realItems[0], null, 2));
-    }
 
     // Return items along with metadata counts and IDs
     return {

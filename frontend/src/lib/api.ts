@@ -1,9 +1,17 @@
 import axios, { AxiosInstance, InternalAxiosRequestConfig } from 'axios';
 
-const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:3000';
+export const getApiBaseUrl = (): string => {
+  if (typeof import.meta.env.VITE_API_URL === 'string') {
+    return import.meta.env.VITE_API_URL.replace(/\/$/, '');
+  }
+  return '';
+};
+
+const rawBaseUrl = getApiBaseUrl();
+const baseURL = rawBaseUrl ? `${rawBaseUrl}/api` : '/api';
 
 const api: AxiosInstance = axios.create({
-  baseURL: `${API_URL}/api`,
+  baseURL,
   headers: {
     'Content-Type': 'application/json',
   },

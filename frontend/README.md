@@ -59,12 +59,13 @@ frontend/
 Create a `.env` file in the frontend directory (optional):
 
 ```
-VITE_API_URL=http://localhost:5000
+VITE_API_URL=http://localhost:3000
 ```
 
 ## Development
 
-- The frontend communicates with the backend API at `http://localhost:5000`
+- In Docker, the frontend communicates via same-origin `/api` through the Nginx reverse proxy.
+- In standalone local development, requests are proxied to the backend at `http://localhost:3000`.
 - Make sure the backend is running before testing API calls
 - Hot module replacement (HMR) is enabled for fast development
 

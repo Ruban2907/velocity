@@ -1,5 +1,8 @@
-require('dotenv').config();
+if (process.env.NODE_ENV !== 'test') {
+  require('dotenv').config();
+}
 const axios = require('axios');
+
 
 /**
  * Proxy to Python pyresparser microservice (ai-service/app.py).
@@ -9,12 +12,74 @@ const parseResumePy = async (req, res) => {
   try {
     const { documentBase64, fileName, position, description } = req.body || {};
 
-    if (!documentBase64) {
+    if (!documentBase64 || typeof documentBase64 !== 'string') {
       return res.status(400).json({
         success: false,
-        message: 'documentBase64 is required (base64-encoded PDF/DOCX)',
+        message: 'documentBase64 is required (base64-encoded PDF/DOCX string)',
       });
     }
+
+    // Strip optional data URI prefix
+    const rawBase64 = documentBase64.replace(/^data:[^;]+;base64,/, '').trim();
+
+    // Validate base64 characters
+    if (!/^[A-Za-z0-9+/=]+$/.test(rawBase64)) {
+      return res.status(400).json({
+        success: false,
+        message: 'Invalid base64 encoding.',
+      });
+    }
+
+    // Enforce 10MB file size limit (~14MB base64 string)
+    const MAX_BASE64_LENGTH = 14 * 1024 * 1024;
+    if (rawBase64.length > MAX_BASE64_LENGTH) {
+      return res.status(413).json({
+        success: false,
+        message: 'Uploaded file exceeds the maximum allowed size limit of 10MB.',
+      });
+    }
+
+    // Validate file extension if fileName provided
+    if (fileName && !/\.(pdf|docx)$/i.test(fileName.trim())) {
+      return res.status(400).json({
+        success: false,
+        message: 'Unsupported file type. Only PDF (.pdf) and Word (.docx) documents are accepted.',
+      });
+    }
+
+    // Validate file signatures (magic bytes):
+    // JVBERi = %PDF-
+    // UEsDB = PK\x03\x04 (ZIP archive header used by DOCX)
+    const prefix = rawBase64.slice(0, 10);
+    const isPdf = prefix.startsWith('JVBERi');
+    const isDocx = prefix.startsWith('UEsDB');
+
+    if (!isPdf && !isDocx) {
+      return res.status(400).json({
+        success: false,
+        message: 'Invalid file format. The uploaded document does not match a valid PDF or DOCX file structure.',
+      });
+    }
+
+    // Validate extension matches content structure
+    if (fileName) {
+      const isPdfExtension = /\.pdf$/i.test(fileName.trim());
+      const isDocxExtension = /\.docx$/i.test(fileName.trim());
+
+      if (isPdfExtension && !isPdf) {
+        return res.status(400).json({
+          success: false,
+          message: 'File content mismatch. The file has a .pdf extension but does not contain a valid PDF structure.',
+        });
+      }
+      if (isDocxExtension && !isDocx) {
+        return res.status(400).json({
+          success: false,
+          message: 'File content mismatch. The file has a .docx extension but does not contain a valid DOCX structure.',
+        });
+      }
+    }
+
 
     if (!position || !String(position).trim()) {
       return res.status(400).json({
@@ -33,8 +98,8 @@ const parseResumePy = async (req, res) => {
     const baseUrl = process.env.AI_SERVICE_URL || 'http://localhost:8001';
     const response = await axios.post(
       `${baseUrl}/parse`,
-      { documentBase64, fileName },
-      { timeout: 30000 }
+      { documentBase64: rawBase64, fileName },
+      { timeout: 60000 }
     );
 
     const parsed = response.data?.data ?? response.data;
@@ -54,22 +119,29 @@ const parseResumePy = async (req, res) => {
       message: response.data?.message,
     });
   } catch (err) {
-    const status = err?.response?.status || 500;
-  const aiBaseUrl = process.env.AI_SERVICE_URL || 'http://localhost:8001';
-  const code = err?.code;
-  const isNetworkError =
-  code === 'ECONNREFUSED' ||
-  code === 'ENOTFOUND' ||
-  code === 'ETIMEDOUT' ||
-  code === 'ECONNABORTED';
-  const message = isNetworkError
-  ? `AI resume parser service is not reachable at ${aiBaseUrl}. Start the Python service in ai-service/ on port 8001.`
-  : (err?.response?.data?.message ||
-    err?.response?.data?.error ||
-    err?.message ||
-    'Failed to parse resume');
+    const code = err?.code;
+    const isTimeout = code === 'ECONNABORTED' || code === 'ETIMEDOUT';
+    const isConnectionError = code === 'ECONNREFUSED' || code === 'ENOTFOUND';
+    const isNetworkError = isTimeout || isConnectionError;
 
-    // Log detailed error server-side for troubleshooting
+    let status = err?.response?.status;
+    if (!status) {
+      if (isTimeout) status = 504;
+      else if (isConnectionError) status = 503;
+      else status = 500;
+    }
+
+    const aiBaseUrl = process.env.AI_SERVICE_URL || 'http://localhost:8001';
+    let message = 'Failed to parse resume';
+    if (isTimeout) {
+      message = 'AI resume parser request timed out. The document may be too large or complex.';
+    } else if (isConnectionError) {
+      message = `AI resume parser service is not reachable at ${aiBaseUrl}. Start the Python service in ai-service/ on port 8001.`;
+    } else {
+      message = err?.response?.data?.message || err?.response?.data?.error || err?.message || 'Failed to parse resume';
+    }
+
+    // Log detailed error server-side for troubleshooting without dumping full payloads
     console.error(
       '[resume.parse] error',
       {
@@ -77,7 +149,7 @@ const parseResumePy = async (req, res) => {
         message,
         code,
         aiBaseUrl,
-        responseData: err?.response?.data,
+        responseData: err?.response?.data?.message || err?.response?.data?.error || (typeof err?.response?.data === 'string' ? err?.response?.data?.slice(0, 200) : undefined),
       }
     );
 
@@ -87,6 +159,7 @@ const parseResumePy = async (req, res) => {
     });
   }
 };
+
 
 const cleanSkillList = (skills, max = 20) => {
   const arr = Array.isArray(skills) ? skills : [];

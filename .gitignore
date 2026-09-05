@@ -1,4 +1,4 @@
-# Logs
+# Logs & debug outputs
 logs
 *.log
 npm-debug.log*
@@ -6,11 +6,21 @@ yarn-debug.log*
 yarn-error.log*
 pnpm-debug.log*
 lerna-debug.log*
+install_log.txt
 
 node_modules
 dist
 dist-ssr
 *.local
+
+# Test coverage outputs
+coverage/
+*.lcov
+.nyc_output/
+
+# Temporary development and scratch files
+scratch/
+backend/scratch/
 
 # Editor directories and files
 .vscode/*
@@ -45,11 +55,33 @@ ai-service/*.pyc
 ai-service/temp.py
 ai-service/*.pdf
 
-# Env files (never commit real secrets)
+# Environment files (never commit real secrets)
 .env
+.env.*
+!.env.example
 backend/.env
+backend/.env.*
+!backend/.env.example
 frontend/.env
+frontend/.env.*
+!frontend/.env.example
+ai-service/.env
+ai-service/.env.*
+!ai-service/.env.example
 
-# Local machine start scripts (do not commit)
-start_saad2.ps1
-ai-service/start_saad.ps1
+# Local database exports and dumps
+db/*.json
+!db/seeds/*.json
+*.dump
+*.bson
+*.rdb
+
+# Machine-specific startup scripts & command artifacts
+startMaheera.ps1
+start_*.ps1
+ai-service/start_*.ps1
+backend@*
+backend/backend@*
+backend/nodemon
+backend/npm
+

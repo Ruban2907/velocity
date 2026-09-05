@@ -1,0 +1,45 @@
+[
+  {
+    "name": "Alex Morgan",
+    "title": "Senior Full Stack Developer",
+    "seniority": "senior",
+    "email": "alex.morgan@example.com",
+    "emailStatus": "verified",
+    "phone": "+1 (555) 019-2834",
+    "linkedinUrl": "https://www.linkedin.com/in/example-alex-morgan",
+    "location": "San Francisco, CA",
+    "companyName": "Tech Innovations LLC",
+    "companyDomain": "techinnovations.example.com",
+    "companyIndustry": "information_technology",
+    "companySize": "100",
+    "contactStatus": "not_contacted",
+    "matchScore": 88,
+    "matchLabel": "Strong match",
+    "rankingReasons": [
+      "title matched",
+      "seniority matched",
+      "location matched"
+    ]
+  },
+  {
+    "name": "Jordan Lee",
+    "title": "Frontend Engineer",
+    "seniority": "mid-level",
+    "email": "jordan.lee@example.com",
+    "emailStatus": "verified",
+    "phone": "+1 (555) 014-9821",
+    "linkedinUrl": "https://www.linkedin.com/in/example-jordan-lee",
+    "location": "Remote",
+    "companyName": "Digital Solutions Co",
+    "companyDomain": "digitalsolutions.example.com",
+    "companyIndustry": "information_technology",
+    "companySize": "50",
+    "contactStatus": "not_contacted",
+    "matchScore": 65,
+    "matchLabel": "Moderate match",
+    "rankingReasons": [
+      "skills overlap",
+      "title matched"
+    ]
+  }
+]

@@ -174,7 +174,8 @@ const generateWithRetry = async (payload) => {
         
         // If it's NOT an overload error, don't bother retrying this model
         if (!isOverloadError(err, err.status)) {
-          console.log(`CRITICAL GEMINI ERROR: ${err.message?.slice(0, 200)}`);
+          const sanitizedMsg = String(err.message || '').replace(/key=[a-zA-Z0-9_\-]+/gi, 'key=[REDACTED]');
+          console.log(`CRITICAL GEMINI ERROR: ${sanitizedMsg.slice(0, 200)}`);
           break; // Move to next model
         }
       }
@@ -243,12 +244,14 @@ router.post("/generate", authenticate, async (req, res) => { //generates the ass
       });
     }
 
-    if (!process.env.GEMINI_API_KEY) {
+    const geminiKey = process.env.GEMINI_API_KEY;
+    if (!geminiKey || geminiKey === "your_gemini_api_key_here" || geminiKey.startsWith("your_")) {
       return res.status(500).json({
         success: false,
-        message: "GEMINI_API_KEY is not configured",
+        message: "GEMINI_API_KEY is not configured or set to placeholder. Please configure a valid Google Gemini API key.",
       });
     }
+
 
     const prompt = `You are an expert technical assessment creator for a recruitment platform.
 Generate exactly 40 multiple choice questions to assess a candidate for this role.
@@ -644,8 +647,14 @@ router.post("/exam/:token/cancel", async (req, res) => {
 
 router.get("/submissions", authenticate, async (req, res) => {
   try {
+    const page = Math.max(1, parseInt(req.query.page, 10) || 1);
+    const limit = Math.min(Math.max(1, parseInt(req.query.limit, 10) || 100), 200);
+    const skip = (page - 1) * limit;
+
     const attempts = await ExamAttempt.find({ recruiterId: req.user._id })
       .sort({ createdAt: -1 })
+      .skip(skip)
+      .limit(limit)
       .populate("assessmentId", "jobTitle totalQuestions");
 
     const data = attempts.map((attempt) => ({
